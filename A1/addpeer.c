@@ -3,6 +3,7 @@
 #include <strings.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "net_util.h"
 #include "structs.h"
@@ -11,7 +12,27 @@ char* msg_header_to_str(msg_header hdr) {
   switch(hdr.type) {
     case KILL: return "KILL";
     case ADD_PEER: return "ADD_PEER";
-    default: return "Unknown message type";
+    default: return "UNKNOWN";
+  }
+}
+
+// Taken from http://wiki.linuxquestions.org/wiki/Fork_off_and_die
+void daemonize() {
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(stderr, "Can't fork.");
+    exit(1);
+  } else if (pid == 0) { // child
+    setsid(); // release from parent
+    int pid2 = fork();
+    if (pid2 < 0) fprintf(stderr, "Can't fork after releasing.\n");
+    else if (pid2 > 0) exit(0); // parent
+    else { // Now running under init
+      close(0); // Close stdin
+      umask(0); chdir("/");
+    }
+  } else { // parent
+    exit(0);
   }
 }
 
@@ -20,21 +41,7 @@ int main(int argc, char *argv[]) {
   int peer_sockfd = -1;
   if(argc == 3) {
     struct sockaddr_in peer_server;
-    bzero(&peer_server, sizeof(struct sockaddr_in));
-    peer_server.sin_family = AF_INET;
-    if (!inet_aton(argv[1], &(peer_server.sin_addr))) {
-      perror("invalid server-ip"); return -1;
-    }
-    peer_server.sin_port = htons(atoi(argv[2]));
-    INFO("Connecting to peer at %s %d\n", inet_ntoa(peer_server.sin_addr), ntohs(peer_server.sin_port));
-
-    if((peer_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-      perror("peer socket"); return -1;
-    }
-    if(connect(peer_sockfd, (struct sockaddr *)&peer_server, sizeof(struct sockaddr_in)) < 0) {
-      fprintf(stderr, "Error: no such peer\n");
-      return -1;
-    }
+    peer_sockfd = connect_to_peer(argv[1], htons(atoi(argv[2])), &peer_server);
   } else {
     INFO("No peer provided, starting new host\n");
   }
@@ -67,6 +74,7 @@ int main(int argc, char *argv[]) {
   }
 
   printf("%s %d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
+  daemonize();
 
   for(int nconnections = 0; nconnections < 1; nconnections++) {
     if (listen(sockfd, 0) < 0) {
@@ -88,11 +96,11 @@ int main(int argc, char *argv[]) {
       perror("recv"); return -1;
     }
 
-    INFO("Parent received %s message\n", msg_header_to_str(hdr));
-    close(connectedsock);
+    INFO("%s received %s message\n", argv[0], msg_header_to_str(hdr));
+    shutdown(connectedsock, SHUT_RDWR);
   }
 
-  close(sockfd);
-
+  shutdown(sockfd, SHUT_RDWR);
+  INFO("%s shutting down\n", argv[0]);
   return 0;
 }
