@@ -16,6 +16,8 @@
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netdb.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "net_util.h"
 
@@ -40,6 +42,25 @@ int connect_to_peer(char* ip, uint32_t port, struct sockaddr_in* peer_server) {
 	return peer_sockfd;
 }
 
+// Taken from http://wiki.linuxquestions.org/wiki/Fork_off_and_die
+void daemonize() {
+  int pid = fork();
+  if (pid < 0) {
+    fprintf(stderr, "Can't fork.");
+    exit(1);
+  } else if (pid == 0) { // child
+    setsid(); // release from parent
+    int pid2 = fork();
+    if (pid2 < 0) fprintf(stderr, "Can't fork after releasing.\n");
+    else if (pid2 > 0) exit(0); // parent
+    else { // Now running under init
+      close(0); // Close stdin
+      umask(0); chdir("/");
+    }
+  } else { // parent
+    exit(0);
+  }
+}
 
 
 /**

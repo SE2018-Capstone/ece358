@@ -23,6 +23,7 @@
 
 // functions
 int connect_to_peer(char* ip, uint32_t port, struct sockaddr_in* peer_server);
+void daemonize();
 uint32_t getPublicIPAddr();
 int mybind(int sockfd, struct sockaddr_in *addr); 
 int pickServerIPAddr(struct in_addr *srv_ip);
