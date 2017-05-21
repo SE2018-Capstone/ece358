@@ -1,13 +1,10 @@
 #include <string>
-#include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <poll.h>
 #include <vector>
+#include <sstream>
 
 #include "net_util.h"
 #include "structs.h"
@@ -18,6 +15,34 @@ char* msg_header_to_str(msg_header hdr) {
     case ADD_PEER: return (char *) "ADD_PEER";
     default: return (char *) "UNKNOWN";
   }
+}
+
+int read_sock(int sockfd, char* buf, int requested_size) {
+  bzero(buf, requested_size);
+  ssize_t recvlen;
+  int bytes_received;
+  for (bytes_received = 0; bytes_received < requested_size;) {
+    if((recvlen = recv(sockfd, buf + bytes_received, requested_size - bytes_received, 0)) < 0) {
+      perror("recv");
+      exit(-1);
+    } else if (recvlen == 0) {
+      return 0;
+    }
+    bytes_received += recvlen;
+  }
+  return bytes_received;
+}
+
+std::string sockfd_to_str(int sockfd) {
+  sockaddr_in addr;
+  socklen_t alen = sizeof(struct sockaddr_in);
+  if (getsockname(sockfd, (struct sockaddr *)&addr, &alen) < 0) {
+    perror("getsockname"); return (char *) "ERROR";
+  }
+
+  std::ostringstream sstream;
+  sstream << inet_ntoa(addr.sin_addr) << ":" << ntohs(addr.sin_port);
+  return sstream.str();
 }
 
 
@@ -100,25 +125,34 @@ int main(int argc, char *argv[]) {
               perror("accept"); return -1;
           }
 
-          INFO("Connection accepted from %s %d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+          INFO("Connection accepted from %s\n", sockfd_to_str(client_sockfd).c_str());
 
           poll_fds.push_back({client_sockfd, POLLIN, 0});
         } else {
           // Existing peer is sending data
           int client_sockfd = poll_fds[i].fd;
           msg_header hdr;
-          bzero(&hdr, sizeof(msg_header));
           ssize_t recvlen;
-          if((recvlen = recv(client_sockfd, &hdr, sizeof(msg_header), 0)) < 0) {
-            perror("recv"); return -1;
-          } else if (recvlen == 0) {
-            INFO("%s:%d Connection was closed\n", argv[0], ntohs(server.sin_port));
+          if((recvlen = read_sock(client_sockfd, (char *) &hdr, sizeof(msg_header))) == 0) {
+            INFO("%s <-> %s connection was closed\n", sockfd_to_str(server_sockfd).c_str(), sockfd_to_str(client_sockfd).c_str());
             close(client_sockfd);
             poll_fds.erase(poll_fds.begin() + i);
           } else {
-            INFO("%s:%d received %s message\n", argv[0], ntohs(server.sin_port), msg_header_to_str(hdr));
-            close(client_sockfd);
-            alive = 0;
+            INFO("%s received %s message\n", sockfd_to_str(server_sockfd).c_str(), msg_header_to_str(hdr));
+            switch(hdr.type) {
+              case ADD_PEER:
+                msg_add_peer msg;
+                msg.hdr = hdr;
+                read_sock(client_sockfd, (char*) &msg.sockaddr, sizeof(msg_add_peer) - sizeof(msg_header));
+                INFO("%s registering new peer at %s:%d\n", sockfd_to_str(server_sockfd).c_str(), inet_ntoa(msg.sockaddr.sin_addr), ntohs(msg.sockaddr.sin_port));
+//                break;
+              case KILL:
+                close(client_sockfd);
+                alive = 0;
+                break;
+              default:
+                exit(-1);
+            }
           }
         }
       }
