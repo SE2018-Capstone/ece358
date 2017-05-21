@@ -18,6 +18,7 @@
 #include <netdb.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/fcntl.h>
 
 #include "net_util.h"
 
@@ -39,7 +40,21 @@ int connect_to_peer(char* ip, uint32_t port, struct sockaddr_in* peer_server) {
 		return -1;
 	}
 
+	fd_set_nonblocking(peer_sockfd);
+
 	return peer_sockfd;
+}
+
+int fd_set_nonblocking(int fd) {
+	int flags = fcntl(fd, F_GETFL, 0);
+	if (flags == -1) {
+		perror("fcntl"); return -1;
+	}
+	flags |= O_NONBLOCK;
+	if (fcntl(fd, F_SETFL, flags) == -1) {
+		perror("fcntl"); return -1;
+	}
+	return 0;
 }
 
 // Taken from http://wiki.linuxquestions.org/wiki/Fork_off_and_die

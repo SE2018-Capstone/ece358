@@ -24,8 +24,8 @@ char* msg_header_to_str(msg_header hdr) {
 
 int main(int argc, char *argv[]) {
   int peer_sockfd = -1;
+  struct sockaddr_in peer_server;
   if(argc == 3) {
-    struct sockaddr_in peer_server;
     peer_sockfd = connect_to_peer(argv[1], htons(atoi(argv[2])), &peer_server);
   } else {
     INFO("No peer provided, starting new host\n");
@@ -38,8 +38,7 @@ int main(int argc, char *argv[]) {
 
   struct in_addr srvip;
   if((srvip.s_addr = getPublicIPAddr()) == 0) {
-    fprintf(stderr, "getPublicIPAddr() returned error.\n");
-    exit(-1);
+    fprintf(stderr, "getPublicIPAddr() returned error.\n"); exit(-1);
   }
 
   struct sockaddr_in server;
@@ -62,25 +61,32 @@ int main(int argc, char *argv[]) {
 
   daemonize(); // must run outside of the tty
 
-  // Make non blocking
-  int flags = fcntl(server_sockfd, F_GETFL, 0);
-  if (flags == -1) {
-    perror("fcntl"); return -1;
-  }
-  flags |= O_NONBLOCK;
-  if (fcntl(server_sockfd, F_SETFL, flags) == -1) {
-    perror("fcntl"); return -1;
+  fd_set_nonblocking(server_sockfd);
+  if (listen(server_sockfd, 0) < 0) {
+    perror("listen"); return -1;
   }
 
   int numfds = 1;
   poll_fds[0].fd = server_sockfd;
   poll_fds[0].events = POLLIN;
 
-  if (listen(server_sockfd, 0) < 0) {
-    perror("listen"); return -1;
+  if (peer_sockfd != -1) {
+    poll_fds[numfds].fd = peer_sockfd;
+    poll_fds[numfds].events = POLLIN;
+    numfds++;
+
+    msg_add_peer add_msg;
+    bzero(&add_msg, sizeof(msg_add_peer));
+    add_msg.hdr.type = ADD_PEER;
+    add_msg.sockaddr = server;
+    ssize_t sentlen;
+    if ((sentlen = send(peer_sockfd, &add_msg, sizeof(add_msg), 0)) < 0) {
+      perror("send add_peer"); return -1;
+    }
   }
 
-  for(int nconnections = 0; nconnections < 1; nconnections++) {
+  int alive = 1;
+  while(alive) {
     if (poll(poll_fds, numfds, -1) == -1) {
       perror("poll"); return -1;
     }
@@ -89,6 +95,7 @@ int main(int argc, char *argv[]) {
       if (poll_fds[i].revents & POLLIN) {
         poll_fds[i].revents = 0;
         if (poll_fds[i].fd == server_sockfd) {
+          // New connection
           int client_sockfd;
           struct sockaddr_in client;
           alen = sizeof(struct sockaddr_in);
@@ -97,25 +104,32 @@ int main(int argc, char *argv[]) {
           }
 
           INFO("Connection accepted from %s %d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+
           poll_fds[numfds].fd = client_sockfd;
           poll_fds[numfds].events = POLLIN;
           numfds++;
         } else {
+          // Existing peer is sending data
           int client_sockfd = poll_fds[i].fd;
           msg_header hdr;
+          bzero(&hdr, sizeof(msg_header));
           ssize_t recvlen;
           if((recvlen = recv(client_sockfd, &hdr, sizeof(msg_header), 0)) < 0) {
             perror("recv"); return -1;
+          } else if (recvlen == 0) {
+            INFO("%s:%d Connection was closed\n", argv[0], ntohs(server.sin_port));
+            alive = 0; // Currently infinite loops, need to stop polling the fd
+          } else {
+            INFO("%s:%d received %s message\n", argv[0], ntohs(server.sin_port), msg_header_to_str(hdr));
+            close(client_sockfd);
+            alive = 0;
           }
-
-          INFO("%s received %s message\n", argv[0], msg_header_to_str(hdr));
-          shutdown(client_sockfd, SHUT_RDWR);
         }
       }
     }
   }
 
   shutdown(server_sockfd, SHUT_RDWR);
-  INFO("%s shutting down\n", argv[0]);
+  INFO("%s:%d shutting down\n", argv[0], ntohs(server.sin_port));
   return 0;
 }

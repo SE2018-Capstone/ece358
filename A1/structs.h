@@ -19,4 +19,9 @@ typedef struct {
   msg_header hdr;
 } msg_kill;
 
+typedef struct {
+  msg_header hdr;
+  struct sockaddr_in sockaddr;
+} msg_add_peer;
+
 #endif //A1_STRUCTS_H
