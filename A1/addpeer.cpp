@@ -1,3 +1,4 @@
+#include <string>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -15,9 +16,9 @@ struct pollfd poll_fds[MAX_CONNECTIONS];
 
 char* msg_header_to_str(msg_header hdr) {
   switch(hdr.type) {
-    case KILL: return "KILL";
-    case ADD_PEER: return "ADD_PEER";
-    default: return "UNKNOWN";
+    case KILL: return (char *) "KILL";
+    case ADD_PEER: return (char *) "ADD_PEER";
+    default: return (char *) "UNKNOWN";
   }
 }
 

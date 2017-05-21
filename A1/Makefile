@@ -2,13 +2,12 @@
 # ECE358 Computer Networks
 # Yiqing Huang, 2017/05/02
 
-CC = gcc
-CFLAGS = -Wall -g  -std=c99 -D_BSD_SOURCE
-LD = gcc
+CC = g++
+CPPFLAGS = -Wall -g  -std=c++0x -D_BSD_SOURCE
+LD = g++
 LDFLAGS = -g 
 LDLIBS = 
 
-NET_SRCS   	= net_util.c 
 OBJS_LIB   	= net_util.o
 OBJS_ADDPEER	= addpeer.o
 OBJS_REMOVEPEER	= removepeer.o
@@ -16,7 +15,7 @@ TARGETS= addpeer.out removepeer.out
 
 all: ${TARGETS}
 
-debug: CFLAGS += -DDEBUG -g
+debug: CPPFLAGS += -DDEBUG -g
 debug: ${TARGETS}
 
 addpeer.out: $(OBJS_LIB) $(OBJS_ADDPEER) 
@@ -25,13 +24,13 @@ addpeer.out: $(OBJS_LIB) $(OBJS_ADDPEER)
 removepeer.out: $(OBJS_LIB) $(OBJS_REMOVEPEER) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
-%.o: %.c 
-	$(CC) $(CFLAGS) -c $< 
+%.o: %.cpp
+	$(CC) $(CPPFLAGS) -c $< 
 
-%.d: %.c
+%.d: %.cpp
 	gcc -MM -MF $@ $<
 
--include $(SRCS:.c=.d)
+-include $(SRCS:.cpp=.d)
 
 .PHONY: clean
 clean:
