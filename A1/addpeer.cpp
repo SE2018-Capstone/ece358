@@ -7,12 +7,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <poll.h>
+#include <vector>
 
 #include "net_util.h"
 #include "structs.h"
-
-#define MAX_CONNECTIONS 256
-struct pollfd poll_fds[MAX_CONNECTIONS];
 
 char* msg_header_to_str(msg_header hdr) {
   switch(hdr.type) {
@@ -67,14 +65,12 @@ int main(int argc, char *argv[]) {
     perror("listen"); return -1;
   }
 
-  int numfds = 1;
-  poll_fds[0].fd = server_sockfd;
-  poll_fds[0].events = POLLIN;
+  std::vector<pollfd> poll_fds;
+
+  poll_fds.push_back({server_sockfd, POLLIN, 0});
 
   if (peer_sockfd != -1) {
-    poll_fds[numfds].fd = peer_sockfd;
-    poll_fds[numfds].events = POLLIN;
-    numfds++;
+    poll_fds.push_back({peer_sockfd, POLLIN, 0});
 
     msg_add_peer add_msg;
     bzero(&add_msg, sizeof(msg_add_peer));
@@ -88,11 +84,11 @@ int main(int argc, char *argv[]) {
 
   int alive = 1;
   while(alive) {
-    if (poll(poll_fds, numfds, -1) == -1) {
+    if (poll(&poll_fds[0], (nfds_t) poll_fds.size(), -1) == -1) {
       perror("poll"); return -1;
     }
 
-    for (int i = 0; i < numfds; i++) {
+    for (int i = 0; i < poll_fds.size(); i++) {
       if (poll_fds[i].revents & POLLIN) {
         poll_fds[i].revents = 0;
         if (poll_fds[i].fd == server_sockfd) {
@@ -106,9 +102,7 @@ int main(int argc, char *argv[]) {
 
           INFO("Connection accepted from %s %d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
-          poll_fds[numfds].fd = client_sockfd;
-          poll_fds[numfds].events = POLLIN;
-          numfds++;
+          poll_fds.push_back({client_sockfd, POLLIN, 0});
         } else {
           // Existing peer is sending data
           int client_sockfd = poll_fds[i].fd;
@@ -119,7 +113,8 @@ int main(int argc, char *argv[]) {
             perror("recv"); return -1;
           } else if (recvlen == 0) {
             INFO("%s:%d Connection was closed\n", argv[0], ntohs(server.sin_port));
-            alive = 0; // Currently infinite loops, need to stop polling the fd
+            close(client_sockfd);
+            poll_fds.erase(poll_fds.begin() + i);
           } else {
             INFO("%s:%d received %s message\n", argv[0], ntohs(server.sin_port), msg_header_to_str(hdr));
             close(client_sockfd);
