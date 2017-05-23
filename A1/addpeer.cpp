@@ -9,42 +9,7 @@
 #include "net_util.h"
 #include "structs.h"
 
-char* msg_header_to_str(msg_header hdr) {
-  switch(hdr.type) {
-    case KILL: return (char *) "KILL";
-    case ADD_PEER: return (char *) "ADD_PEER";
-    default: return (char *) "UNKNOWN";
-  }
-}
-
-int read_sock(int sockfd, char* buf, int requested_size) {
-  bzero(buf, requested_size);
-  ssize_t recvlen;
-  int bytes_received;
-  for (bytes_received = 0; bytes_received < requested_size;) {
-    if((recvlen = recv(sockfd, buf + bytes_received, requested_size - bytes_received, 0)) < 0) {
-      perror("recv");
-      exit(-1);
-    } else if (recvlen == 0) {
-      return 0;
-    }
-    bytes_received += recvlen;
-  }
-  return bytes_received;
-}
-
-std::string sockfd_to_str(int sockfd) {
-  sockaddr_in addr;
-  socklen_t alen = sizeof(struct sockaddr_in);
-  if (getsockname(sockfd, (struct sockaddr *)&addr, &alen) < 0) {
-    perror("getsockname"); return (char *) "ERROR";
-  }
-
-  std::ostringstream sstream;
-  sstream << inet_ntoa(addr.sin_addr) << ":" << ntohs(addr.sin_port);
-  return sstream.str();
-}
-
+std::vector<peer_data> peers;
 
 int main(int argc, char *argv[]) {
   int peer_sockfd = -1;
@@ -95,16 +60,11 @@ int main(int argc, char *argv[]) {
   poll_fds.push_back({server_sockfd, POLLIN, 0});
 
   if (peer_sockfd != -1) {
+    peers.push_back({peer_sockfd, peer_server});
     poll_fds.push_back({peer_sockfd, POLLIN, 0});
 
-    msg_add_peer add_msg;
-    bzero(&add_msg, sizeof(msg_add_peer));
-    add_msg.hdr.type = ADD_PEER;
-    add_msg.sockaddr = server;
-    ssize_t sentlen;
-    if ((sentlen = send(peer_sockfd, &add_msg, sizeof(add_msg), 0)) < 0) {
-      perror("send add_peer"); return -1;
-    }
+    msg_add_peer add_msg = {{ADD_PEER}, server};
+    send_sock(peer_sockfd, (char *) &add_msg, sizeof(add_msg));
   }
 
   int alive = 1;
@@ -140,16 +100,44 @@ int main(int argc, char *argv[]) {
           } else {
             INFO("%s received %s message\n", sockfd_to_str(server_sockfd).c_str(), msg_header_to_str(hdr));
             switch(hdr.type) {
-              case ADD_PEER:
-                msg_add_peer msg;
-                msg.hdr = hdr;
-                read_sock(client_sockfd, (char*) &msg.sockaddr, sizeof(msg_add_peer) - sizeof(msg_header));
-                INFO("%s registering new peer at %s:%d\n", sockfd_to_str(server_sockfd).c_str(), inet_ntoa(msg.sockaddr.sin_addr), ntohs(msg.sockaddr.sin_port));
-//                break;
-              case KILL:
+              case ADD_PEER: {
+                msg_add_peer add_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &add_msg) + sizeof(msg_header),
+                          sizeof(msg_add_peer) - sizeof(msg_header));
+                INFO("%s registering new peer at %s:%d\n", sockfd_to_str(server_sockfd).c_str(),
+                     inet_ntoa(add_msg.sockaddr.sin_addr), ntohs(add_msg.sockaddr.sin_port));
+
+                if (peers.size() > 0) {
+                  msg_update_peers update_msg;
+                  update_msg.hdr.type = UPDATE_PEERS;
+                  update_msg.num_peers = (int) peers.size();
+                  send_sock(client_sockfd, (char *) &update_msg, sizeof(update_msg));
+                  send_sock(client_sockfd, (char *) &peers[0], (int) (peers.size() * sizeof(peer_data)));
+                }
+                peers.push_back({client_sockfd, add_msg.sockaddr});
+                break;
+              }
+              case UPDATE_PEERS: {
+                msg_update_peers update_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &update_msg) + sizeof(msg_header),
+                          sizeof(msg_update_peers) - sizeof(msg_header));
+                peer_data peer_update[update_msg.num_peers];
+                read_sock(client_sockfd, (char *) &peer_update, sizeof(peer_update));
+                for (int i = 0; i < update_msg.num_peers; i++) {
+                  peers.push_back(peer_update[i]);
+                }
+
+                INFO("%s: NEW PEERS: \n", sockfd_to_str(server_sockfd).c_str());
+                for (int i = 0; i < peers.size(); i++) {
+                  INFO("-> %s:%d\n", inet_ntoa(peers[i].peer_server.sin_addr), ntohs(peers[i].peer_server.sin_port));
+                }
+                break;
+              }
+              case KILL: {
                 close(client_sockfd);
                 alive = 0;
                 break;
+              }
               default:
                 exit(-1);
             }

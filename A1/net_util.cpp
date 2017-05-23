@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include <sstream>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -21,6 +21,47 @@
 #include <sys/fcntl.h>
 
 #include "net_util.h"
+
+int read_sock(int sockfd, char* buf, int requested_size) {
+	bzero(buf, requested_size);
+	ssize_t recvlen;
+	int bytes_received = 0;
+	while (bytes_received < requested_size) {
+		if((recvlen = recv(sockfd, buf + bytes_received, requested_size - bytes_received, 0)) < 0) {
+			perror("recv");
+			exit(-1);
+		} else if (recvlen == 0) {
+			return 0;
+		}
+		bytes_received += recvlen;
+	}
+	return bytes_received;
+}
+
+int send_sock(int sockfd, char* buf, int buf_size) {
+	ssize_t sendlen;
+	int bytes_sent = 0;
+	while (bytes_sent < buf_size) {
+		if((sendlen = send(sockfd, buf + bytes_sent, buf_size - bytes_sent, 0)) < 0) {
+			perror("send");
+			exit(-1);
+		}
+		bytes_sent += sendlen;
+	}
+	return bytes_sent;
+}
+
+std::string sockfd_to_str(int sockfd) {
+	sockaddr_in addr;
+	socklen_t alen = sizeof(struct sockaddr_in);
+	if (getsockname(sockfd, (struct sockaddr *)&addr, &alen) < 0) {
+		perror("getsockname"); return (char *) "ERROR";
+	}
+
+	std::ostringstream sstream;
+	sstream << inet_ntoa(addr.sin_addr) << ":" << ntohs(addr.sin_port);
+	return sstream.str();
+}
 
 int connect_to_peer(char* ip, uint32_t port, struct sockaddr_in* peer_server) {
 	bzero(peer_server, sizeof(struct sockaddr_in));

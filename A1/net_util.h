@@ -10,6 +10,7 @@
 
 //includes
 #include <netinet/in.h>
+#include <string>
 
 // defines
 #define PORT_RANGE_LO 10000
@@ -22,6 +23,9 @@
 #endif
 
 // functions
+int read_sock(int sockfd, char* buf, int requested_size);
+int send_sock(int sockfd, char* buf, int buf_size);
+std::string sockfd_to_str(int sockfd);
 int connect_to_peer(char* ip, uint32_t port, struct sockaddr_in* peer_server);
 int fd_set_nonblocking(int fd);
 void daemonize();
