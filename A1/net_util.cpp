@@ -21,9 +21,10 @@
 #include <sys/fcntl.h>
 
 #include "net_util.h"
+#include "structs.h"
 
 int read_sock(int sockfd, char* buf, int requested_size) {
-	bzero(buf, requested_size);
+	memset(buf, 0, requested_size);
 	ssize_t recvlen;
 	int bytes_received = 0;
 	while (bytes_received < requested_size) {
@@ -63,20 +64,25 @@ std::string sockfd_to_str(int sockfd) {
 	return sstream.str();
 }
 
-int connect_to_peer(char* ip, uint32_t port, struct sockaddr_in* peer_server) {
-	bzero(peer_server, sizeof(struct sockaddr_in));
-	peer_server->sin_family = AF_INET;
-	if (!inet_aton(ip, &(peer_server->sin_addr))) {
-		perror("invalid server-ip"); return -1;
-	}
-	peer_server->sin_port = port;
-	INFO("Connecting to peer at %s %d\n", inet_ntoa(peer_server->sin_addr), ntohs(peer_server->sin_port));
+struct sockaddr_in create_sockaddr_in(char* ip, uint32_t port) {
+  struct sockaddr_in server;
+  memset(&server, 0, sizeof(struct sockaddr_in));
+  server.sin_family = AF_INET;
+  if (!inet_aton(ip, &(server.sin_addr))) {
+    perror("invalid server-ip"); exit(-1);
+  }
+  server.sin_port = port;
+  return server;
+}
+
+int connect_to_peer(struct sockaddr_in peer_server) {
+  INFO("Connecting to peer at %s %d\n", inet_ntoa(peer_server.sin_addr), ntohs(peer_server.sin_port));
 
 	int peer_sockfd = -1;
 	if((peer_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		perror("peer socket"); return -1;
 	}
-	if(connect(peer_sockfd, (struct sockaddr *)peer_server, sizeof(struct sockaddr_in)) < 0) {
+	if(connect(peer_sockfd, (struct sockaddr *)&peer_server, sizeof(struct sockaddr_in)) < 0) {
 		fprintf(stderr, "Error: no such peer\n");
 		return -1;
 	}
@@ -236,7 +242,7 @@ char readYorN() {
 /* Cycle through IP addresses. Let user pick one. */
 int pickServerIPAddr(struct in_addr *srv_ip) {
 	if(srv_ip == NULL) return -1;
-	bzero(srv_ip, sizeof(struct in_addr));
+	memset(srv_ip, 0, sizeof(struct in_addr));
 
 	struct ifaddrs *ifa;
 	if(getifaddrs(&ifa) < 0) {

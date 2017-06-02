@@ -16,10 +16,10 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  struct sockaddr_in peer_server;
-  int peer_sockfd = connect_to_peer(argv[1], htons(atoi(argv[2])), &peer_server);
+  struct sockaddr_in peer_server = create_sockaddr_in(argv[1], htons(atoi(argv[2]));
+  int peer_sockfd = connect_to_peer(peer_server);
   msg_kill kill_msg;
-  bzero(&kill_msg, sizeof(msg_kill));
+  memset(&kill_msg, 0, sizeof(msg_kill));
   kill_msg.hdr.type = KILL;
   ssize_t sentlen;
   if ((sentlen = send(peer_sockfd, &kill_msg, sizeof(msg_kill), 0)) < 0) {
