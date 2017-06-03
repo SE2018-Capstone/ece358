@@ -18,12 +18,12 @@ int main(int argc, char *argv[]) {
 
   struct sockaddr_in peer_server = create_sockaddr_in(argv[1], htons(atoi(argv[2])));
   int peer_sockfd = connect_to_peer(peer_server);
-  msg_basic kill_msg;
-  memset(&kill_msg, 0, sizeof(msg_basic));
-  kill_msg.hdr.type = KILL;
+  msg_basic ping_msg;
+  memset(&ping_msg, 0, sizeof(msg_basic));
+  ping_msg.hdr.type = START_PING;
   ssize_t sentlen;
-  if ((sentlen = send(peer_sockfd, &kill_msg, sizeof(kill_msg), 0)) < 0) {
-    perror("send kill"); return -1;
+  if ((sentlen = send(peer_sockfd, &ping_msg, sizeof(ping_msg), 0)) < 0) {
+    perror("send ping"); return -1;
   }
 
   if(shutdown(peer_sockfd, SHUT_RDWR) < 0) {

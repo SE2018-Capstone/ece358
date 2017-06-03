@@ -9,14 +9,19 @@
 #include "net_util.h"
 #include "structs.h"
 
+#ifdef DEBUG
+extern int debug_id;
+#endif
+
 peer_data pred;
 peer_data succ;
 int server_sockfd;
 int state[MAX_STATES];
 std::vector<pollfd> poll_fds;
 
-void update_peer_data(peer_data* data, struct sockaddr_in sockaddr) {
-  if (data->peer_fd != server_sockfd) {
+// Note: Also opens a new connection with the given sockaddr
+void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_debug_id) {
+  if (succ.peer_fd != pred.peer_fd && data->peer_fd != server_sockfd) {
     close(data->peer_fd);
     for (int j = 0; j < poll_fds.size(); j++) {
       if (poll_fds[j].fd == data->peer_fd) {
@@ -28,9 +33,22 @@ void update_peer_data(peer_data* data, struct sockaddr_in sockaddr) {
   data->peer_server = sockaddr;
   data->peer_fd = connect_to_peer(sockaddr);
   poll_fds.push_back({data->peer_fd, POLLIN, 0});
+  data->peer_debug_id = peer_debug_id;
+
+  // If you used to be alone, update both pred and succ
+  INFO("Setting %s to %i (fd: %i)\n", data == &pred ? "pred" : "succ", peer_debug_id, data->peer_fd);
+  if (data == &pred && succ.peer_fd == server_sockfd) {
+    memcpy(&succ, &pred, sizeof(peer_data));
+    INFO("Also setting succ to %i\n", peer_debug_id);
+  } else if (data == &succ && pred.peer_fd == server_sockfd) {
+    memcpy(&pred, &succ, sizeof(peer_data));
+    INFO("Also setting pred to %i\n", peer_debug_id);
+  }
 }
 
 int main(int argc, char *argv[]) {
+  srand ( time(NULL) );
+  debug_id = rand() % 1000;
   memset(&state, 0, sizeof(state));
 
   int peer_sockfd = -1;
@@ -70,8 +88,8 @@ int main(int argc, char *argv[]) {
   printf("%s %d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
 
   daemonize(); // must run outside of the tty
-  pred = {server_sockfd, server};
-  succ = {server_sockfd, server};
+  pred = {server_sockfd, server, debug_id};
+  succ = {server_sockfd, server, debug_id};
 
   fd_set_nonblocking(server_sockfd);
   if (listen(server_sockfd, 0) < 0) {
@@ -83,12 +101,12 @@ int main(int argc, char *argv[]) {
   if (peer_sockfd != -1) {
     poll_fds.push_back({peer_sockfd, POLLIN, 0});
 
-    msg_update_pred get_neighbors_msg = {{GET_NEIGHBOURS}};
-    state[REQUESTING_SUCCESSOR] = 1;
-    send_sock(peer_sockfd, (char *) &get_neighbors_msg, sizeof(get_neighbors_msg));
+    msg_basic get_info_msg = {{GET_INFO}};
+    state[AWAITING_INSERTION] = 1;
+    send_sock(peer_sockfd, (char *) &get_info_msg, sizeof(get_info_msg));
 
-    msg_update_pred update_pred_msg = {{UPDATE_PRED}, server};
-    send_sock(peer_sockfd, (char *) &update_pred_msg, sizeof(update_pred_msg));
+    msg_update_succ update_succ_msg = {{UPDATE_SUCC}, server, debug_id};
+    send_sock(peer_sockfd, (char *) &update_succ_msg, sizeof(update_succ_msg));
   }
 
   int alive = 1;
@@ -117,48 +135,87 @@ int main(int argc, char *argv[]) {
           int client_sockfd = poll_fds[i].fd;
           msg_header hdr;
           if(read_sock(client_sockfd, (char *) &hdr, sizeof(msg_header)) == 0) {
-            INFO("%s <-> %s connection was closed\n", sockfd_to_str(server_sockfd).c_str(), sockfd_to_str(client_sockfd).c_str());
-            close(client_sockfd);
+            INFO("Connection with %s was closed\n", sockfd_to_str(client_sockfd).c_str());
+            close(client_sockfd); // Closed in update_peer_data
             poll_fds.erase(poll_fds.begin() + i);
           } else {
-            INFO("%s received %s message\n", sockfd_to_str(server_sockfd).c_str(), msg_type_to_str(hdr.type));
+            INFO("Received %s message\n", msg_type_to_str(hdr.type));
             switch(hdr.type) {
               case UPDATE_SUCC: {
                 msg_update_succ update_msg = {hdr};
                 read_sock(client_sockfd, ((char *) &update_msg) + sizeof(msg_header),
                           sizeof(update_msg) - sizeof(msg_header));
-                update_peer_data(&succ, update_msg.succ_server);
+                update_peer_data(&succ, update_msg.succ_server, update_msg.succ_debug_id);
                 break;
               }
               case UPDATE_PRED: {
                 msg_update_pred update_msg = {hdr};
                 read_sock(client_sockfd, ((char *) &update_msg) + sizeof(msg_header),
                           sizeof(update_msg) - sizeof(msg_header));
-                update_peer_data(&succ, update_msg.pred_server);
+                update_peer_data(&pred, update_msg.pred_server, update_msg.pred_debug_id);
                 break;
               }
-              case GET_NEIGHBOURS: {
-                msg_neighbours msg = {{NEIGHBOURS}, pred.peer_server, succ.peer_server};
+              case GET_INFO: {
+                INFO("  Predecessor: %i, Successor: %i\n", pred.peer_debug_id, succ.peer_debug_id);
+                msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id};
                 send_sock(client_sockfd, (char *) &msg, sizeof(msg));
                 break;
               }
-              case NEIGHBOURS: {
-                msg_neighbours neighbours_msg = {hdr};
-                read_sock(client_sockfd, ((char *) &neighbours_msg) + sizeof(msg_header),
-                          sizeof(neighbours_msg) - sizeof(msg_header));
-                if (state[REQUESTING_SUCCESSOR] == 1) {
-                  update_peer_data(&succ, neighbours_msg.succ_server);
-                  msg_update_pred update_pred_msg = {{UPDATE_PRED}, server};
-                  send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
+              case INFO: {
+                msg_info info_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &info_msg) + sizeof(msg_header),
+                          sizeof(info_msg) - sizeof(msg_header));
+                if (state[AWAITING_INSERTION] == 1) {
+                  pred = {client_sockfd, info_msg.server, info_msg.debug_id};
+                  INFO("Setting pred to %i (fd: %i)\n", pred.peer_debug_id, pred.peer_fd);
+                  if (!sockaddr_equals(pred.peer_server, info_msg.succ_server)) {
+                    msg_update_pred update_pred_msg = {{UPDATE_PRED}, server, debug_id};
+                    update_peer_data(&succ, info_msg.succ_server, info_msg.succ_debug_id);
+                    send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
+                  } else {
+                    memcpy(&succ, &pred, sizeof(pred));
+                  }
+                  INFO("Setting succ to %i (fd: %i)\n", succ.peer_debug_id, succ.peer_fd);
+                  state[AWAITING_INSERTION] = false;
                 }
                 break;
               }
-              case KILL: {
-                close(client_sockfd);
-                alive = 0;
+//              case KILL: {
+////                if (pred.peer_fd != server_sockfd) {
+////                  msg_update_pred update_pred_msg = {{UPDATE_PRED}, succ.peer_server};
+////                  send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
+////                  msg_update_succ update_succ_msg = {{UPDATE_SUCC}, pred.peer_server};
+////                  send_sock(pred.peer_fd, (char*) &update_succ_msg, sizeof(update_succ_msg));
+////                }
+//                close(client_sockfd);
+//                alive = 0;
+//                break;
+//              }
+              case START_PING: {
+                state[AWAITING_PING_RETURN] = 1;
+                INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
+                if (succ.peer_fd != server_sockfd) {
+                  msg_basic ping_msg = {{FORWARD_PING}};
+                  send_sock(succ.peer_fd, (char*) &ping_msg, sizeof(ping_msg));
+                }
+                break;
+              }
+              case FORWARD_PING: {
+                if (state[AWAITING_PING_RETURN] == 1) {
+                  INFO("COMPLETED PING\n");
+                  state[AWAITING_PING_RETURN] = 0;
+                } else {
+                  INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
+                  msg_basic ping_msg = {{FORWARD_PING}};
+                  send_sock(succ.peer_fd, (char*) &ping_msg, sizeof(ping_msg));
+                }
+                break;
+              }
+              case ACK: {
                 break;
               }
               default:
+                INFO_RED("NO HANDLER FOR MSG\n");
                 exit(-1);
             }
           }

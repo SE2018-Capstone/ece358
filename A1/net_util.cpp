@@ -21,7 +21,15 @@
 #include <sys/fcntl.h>
 
 #include "net_util.h"
-#include "structs.h"
+
+#ifdef DEBUG
+int debug_id = rand() % 100;
+#endif
+
+bool sockaddr_equals(struct sockaddr_in server1, struct sockaddr_in server2) {
+	return memcmp(&server1.sin_addr, &server2.sin_addr, sizeof(in_addr)) == 0
+					&& memcmp(&server1.sin_port, &server2.sin_port, sizeof(in_port_t)) == 0;
+}
 
 int read_sock(int sockfd, char* buf, int requested_size) {
 	memset(buf, 0, requested_size);
@@ -52,6 +60,13 @@ int send_sock(int sockfd, char* buf, int buf_size) {
 	return bytes_sent;
 }
 
+std::string sockaddr_to_str(const struct sockaddr_in &sockaddr) {
+	std::ostringstream sstream;
+	sstream << inet_ntoa(sockaddr.sin_addr) << ":" << ntohs(sockaddr.sin_port);
+//	sstream << ntohs(sockaddr.sin_port);
+	return sstream.str();
+}
+
 std::string sockfd_to_str(int sockfd) {
 	sockaddr_in addr;
 	socklen_t alen = sizeof(struct sockaddr_in);
@@ -59,10 +74,9 @@ std::string sockfd_to_str(int sockfd) {
 		perror("getsockname"); return (char *) "ERROR";
 	}
 
-	std::ostringstream sstream;
-	sstream << inet_ntoa(addr.sin_addr) << ":" << ntohs(addr.sin_port);
-	return sstream.str();
+	return sockaddr_to_str(addr);
 }
+
 
 struct sockaddr_in create_sockaddr_in(char* ip, uint32_t port) {
   struct sockaddr_in server;

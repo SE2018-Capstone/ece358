@@ -3,3 +3,4 @@
 *.out
 *.d
 *.idea
+cmake-build-debug
