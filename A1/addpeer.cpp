@@ -1,4 +1,4 @@
-#include <string>
+#include <string.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -27,7 +27,7 @@ unsigned int nextId = 0;
 void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_debug_id) {
   if (succ.peer_fd != pred.peer_fd && data->peer_fd != server_sockfd) {
     close(data->peer_fd);
-    for (int j = 0; j < poll_fds.size(); j++) {
+    for (unsigned int j = 0; j < poll_fds.size(); j++) {
       if (poll_fds[j].fd == data->peer_fd) {
         poll_fds.erase(poll_fds.begin() + j);
       }
@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
       perror("poll"); return -1;
     }
 
-    for (int i = 0; i < poll_fds.size(); i++) {
+    for (unsigned int i = 0; i < poll_fds.size(); i++) {
       if (poll_fds[i].revents & POLLIN) {
         poll_fds[i].revents = 0;
         if (poll_fds[i].fd == server_sockfd) {

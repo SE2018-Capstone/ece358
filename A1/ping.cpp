@@ -2,6 +2,7 @@
 // Created by Shiranka Miskin on 2017-05-16.
 //
 
+#include <string.h>
 #include <strings.h>
 #include <arpa/inet.h>
 #include <stdio.h>
