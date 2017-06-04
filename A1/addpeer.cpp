@@ -16,6 +16,7 @@ extern int debug_id;
 peer_data pred;
 peer_data succ;
 int server_sockfd;
+struct sockaddr_in server;
 int state[MAX_STATES];
 std::vector<pollfd> poll_fds;
 
@@ -31,16 +32,20 @@ void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_deb
   }
 
   data->peer_server = sockaddr;
-  data->peer_fd = connect_to_peer(sockaddr);
-  poll_fds.push_back({data->peer_fd, POLLIN, 0});
   data->peer_debug_id = peer_debug_id;
+  if (!sockaddr_equals(sockaddr, server)) {
+    data->peer_fd = connect_to_peer(sockaddr);
+    poll_fds.push_back({data->peer_fd, POLLIN, 0});
+  } else {
+    data->peer_fd = server_sockfd;
+  }
 
   // If you used to be alone, update both pred and succ
   INFO("Setting %s to %i (fd: %i)\n", data == &pred ? "pred" : "succ", peer_debug_id, data->peer_fd);
-  if (data == &pred && succ.peer_fd == server_sockfd) {
+  if (data == &pred && succ.peer_fd == server_sockfd && pred.peer_fd != server_sockfd) {
     memcpy(&succ, &pred, sizeof(peer_data));
     INFO("Also setting succ to %i\n", peer_debug_id);
-  } else if (data == &succ && pred.peer_fd == server_sockfd) {
+  } else if (data == &succ && pred.peer_fd == server_sockfd && succ.peer_fd != server_sockfd) {
     memcpy(&pred, &succ, sizeof(peer_data));
     INFO("Also setting pred to %i\n", peer_debug_id);
   }
@@ -69,7 +74,6 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "getPublicIPAddr() returned error.\n"); exit(-1);
   }
 
-  struct sockaddr_in server;
   memset(&server, 0, sizeof(struct sockaddr_in));
   server.sin_family = AF_INET;
   memcpy(&(server.sin_addr), &srvip, sizeof(struct in_addr));
@@ -180,17 +184,18 @@ int main(int argc, char *argv[]) {
                 }
                 break;
               }
-//              case KILL: {
-////                if (pred.peer_fd != server_sockfd) {
-////                  msg_update_pred update_pred_msg = {{UPDATE_PRED}, succ.peer_server};
-////                  send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
-////                  msg_update_succ update_succ_msg = {{UPDATE_SUCC}, pred.peer_server};
-////                  send_sock(pred.peer_fd, (char*) &update_succ_msg, sizeof(update_succ_msg));
-////                }
-//                close(client_sockfd);
-//                alive = 0;
-//                break;
-//              }
+              case KILL: {
+                if (pred.peer_fd != server_sockfd) { // Only false if only 1 peer
+                  msg_update_pred update_pred_msg = {{UPDATE_PRED}, pred.peer_server, pred.peer_debug_id};
+                  send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
+                  msg_update_succ update_succ_msg = {{UPDATE_SUCC}, succ.peer_server, succ.peer_debug_id};
+                  send_sock(pred.peer_fd, (char*) &update_succ_msg, sizeof(update_succ_msg));
+                }
+                close(pred.peer_fd);
+                close(succ.peer_fd);
+                alive = 0;
+                break;
+              }
               case START_PING: {
                 state[AWAITING_PING_RETURN] = 1;
                 INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
