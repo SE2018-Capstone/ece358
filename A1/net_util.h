@@ -22,6 +22,8 @@
 #define INFO_YELLOW(...) fprintf(stderr, "\x1b[33m %3i: ", debug_id); fprintf( stderr, __VA_ARGS__); fprintf(stderr, "\x1b[0m");
 #else
 #define INFO(...) do {} while (0)
+#define INFO_RED(...) do {} while (0)
+#define INFO_YELLOW(...) do {} while (0)
 #endif
 
 // functions

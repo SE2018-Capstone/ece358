@@ -22,9 +22,7 @@
 
 #include "net_util.h"
 
-#ifdef DEBUG
 int debug_id = rand() % 100;
-#endif
 
 bool sockaddr_equals(struct sockaddr_in server1, struct sockaddr_in server2) {
 	return memcmp(&server1.sin_addr, &server2.sin_addr, sizeof(in_addr)) == 0

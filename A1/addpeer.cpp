@@ -9,9 +9,7 @@
 #include "net_util.h"
 #include "structs.h"
 
-#ifdef DEBUG
 extern int debug_id;
-#endif
 
 peer_data pred;
 peer_data succ;
