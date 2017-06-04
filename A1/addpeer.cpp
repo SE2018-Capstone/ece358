@@ -18,6 +18,11 @@ struct sockaddr_in server;
 int state[MAX_STATES];
 std::vector<pollfd> poll_fds;
 
+unsigned int numContent = 0;
+unsigned int numPeers = 1;
+unsigned int nextId = 0;
+
+
 // Note: Also opens a new connection with the given sockaddr
 void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_debug_id) {
   if (succ.peer_fd != pred.peer_fd && data->peer_fd != server_sockfd) {
@@ -159,7 +164,7 @@ int main(int argc, char *argv[]) {
               }
               case GET_INFO: {
                 INFO("  Predecessor: %i, Successor: %i\n", pred.peer_debug_id, succ.peer_debug_id);
-                msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id};
+                msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id, numContent, numPeers, nextId};
                 send_sock(client_sockfd, (char *) &msg, sizeof(msg));
                 break;
               }
@@ -168,6 +173,9 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, ((char *) &info_msg) + sizeof(msg_header),
                           sizeof(info_msg) - sizeof(msg_header));
                 if (state[AWAITING_INSERTION] == 1) {
+                  numContent = info_msg.numContent;
+                  numPeers = info_msg.numPeers + 1;
+                  nextId = info_msg.nextId;
                   pred = {client_sockfd, info_msg.server, info_msg.debug_id};
                   INFO("Setting pred to %i (fd: %i)\n", pred.peer_debug_id, pred.peer_fd);
                   if (!sockaddr_equals(pred.peer_server, info_msg.succ_server)) {
@@ -178,6 +186,11 @@ int main(int argc, char *argv[]) {
                     memcpy(&succ, &pred, sizeof(pred));
                   }
                   INFO("Setting succ to %i (fd: %i)\n", succ.peer_debug_id, succ.peer_fd);
+
+                  state[AWAITING_COUNTS_RETURN] = 1;
+                  msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
+                  send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
+
                   state[AWAITING_INSERTION] = false;
                 }
                 break;
@@ -188,10 +201,36 @@ int main(int argc, char *argv[]) {
                   send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
                   msg_update_succ update_succ_msg = {{UPDATE_SUCC}, succ.peer_server, succ.peer_debug_id};
                   send_sock(pred.peer_fd, (char*) &update_succ_msg, sizeof(update_succ_msg));
+
+                  msg_pred_removal pred_removal_msg = {{PRED_REMOVAL}};
+                  send_sock(succ.peer_fd, (char*) &pred_removal_msg, sizeof(pred_removal_msg));
                 }
                 close(pred.peer_fd);
                 close(succ.peer_fd);
                 alive = 0;
+                break;
+              }
+              case PRED_REMOVAL: {
+                numPeers = numPeers - 1;
+
+                state[AWAITING_COUNTS_RETURN] = 1;
+                msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
+                send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
+                break;
+              }
+              case FORWARD_COUNTS: {
+                msg_counts counts_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &counts_msg) + sizeof(msg_header),
+                          sizeof(counts_msg) - sizeof(msg_header));
+                if (state[AWAITING_COUNTS_RETURN] == 1) {
+                  INFO_YELLOW("Updated all counts:  numContent=%u, numPeers=%u, nextId=%u \n", numContent, numPeers, nextId);
+                  state[AWAITING_COUNTS_RETURN] = 0;
+                } else {
+                  numContent = counts_msg.numContent;
+                  numPeers = counts_msg.numPeers;
+                  nextId = counts_msg.nextId;
+                  send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
+                }
                 break;
               }
               case START_PING: {
@@ -205,7 +244,6 @@ int main(int argc, char *argv[]) {
               }
               case FORWARD_PING: {
                 if (state[AWAITING_PING_RETURN] == 1) {
-                  INFO("COMPLETED PING\n");
                   state[AWAITING_PING_RETURN] = 0;
                 } else {
                   INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);

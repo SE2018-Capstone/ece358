@@ -14,6 +14,8 @@ typedef enum {
   INFO,
   START_PING,
   FORWARD_PING,
+  FORWARD_COUNTS,
+  PRED_REMOVAL,
   ACK, // No purpose, just debugging
 } msg_type;
 
@@ -27,6 +29,8 @@ char* msg_type_to_str(msg_type type) {
     case INFO: return (char *) "INFO";
     case START_PING: return (char *) "START_PING";
     case FORWARD_PING: return (char *) "FORWARD_PING";
+    case FORWARD_COUNTS: return (char *) "FORWARD_COUNTS";
+    case PRED_REMOVAL: return (char *) "PRED_REMOVAL";
     case ACK: return (char *) "ACK";
     default: return (char *) "UNKNOWN";
   }
@@ -35,6 +39,7 @@ char* msg_type_to_str(msg_type type) {
 typedef enum {
   AWAITING_INSERTION,
   AWAITING_PING_RETURN,
+  AWAITING_COUNTS_RETURN,
   MAX_STATES
 } peer_states;
 
@@ -66,13 +71,29 @@ typedef struct {
   int pred_debug_id;
   struct sockaddr_in succ_server;
   int succ_debug_id;
+  unsigned int numContent;
+  unsigned int numPeers;
+  unsigned int nextId;
 } msg_info;
+
+typedef struct {
+  msg_header hdr;
+  unsigned int numContent;
+  unsigned int numPeers;
+  unsigned int nextId;
+} msg_counts;
+
+typedef struct {
+  msg_header hdr;
+// Hold all the content that used to be on this peer
+} msg_pred_removal;
 
 typedef struct {
   int peer_fd;
   struct sockaddr_in peer_server;
   int peer_debug_id;
 } peer_data;
+
 
 
 #endif //A1_STRUCTS_H
