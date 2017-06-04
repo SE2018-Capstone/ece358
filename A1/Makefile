@@ -12,7 +12,8 @@ OBJS_LIB   	= net_util.o
 OBJS_ADDPEER	= addpeer.o
 OBJS_REMOVEPEER	= removepeer.o
 OBJS_PING	= ping.o
-TARGETS= addpeer.out removepeer.out ping.out
+OBJS_ADDCONTENT	= addcontent.o
+TARGETS= addpeer.out removepeer.out ping.out addcontent.out
 
 all: ${TARGETS}
 
@@ -26,6 +27,9 @@ removepeer.out: $(OBJS_LIB) $(OBJS_REMOVEPEER)
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
 ping.out: $(OBJS_LIB) $(OBJS_PING) 
+	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
+
+addcontent.out: $(OBJS_LIB) $(OBJS_ADDCONTENT) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
 %.o: %.cpp

@@ -5,6 +5,7 @@
 #include <poll.h>
 #include <vector>
 #include <sstream>
+#include <map>
 
 #include "net_util.h"
 #include "structs.h"
@@ -20,8 +21,29 @@ std::vector<pollfd> poll_fds;
 
 unsigned int numContent = 0;
 unsigned int numPeers = 1;
-unsigned int nextId = 0;
+unsigned int nextId = 1; // Id of 0 is reserved to determine whether msg_add_content is being forwarded or not
+std::map<unsigned int, std::string> content_map;
 
+unsigned int uint_ceil(unsigned int n, unsigned int d) {
+  return (n % d) ? n / d + 1 : n / d;
+}
+
+void forward_counts() {
+  state[AWAITING_COUNTS_RETURN] = 1;
+  msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
+  send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
+}
+
+void forward_content(msg_add_content msg, char* content) {
+  ssize_t sentlen;
+  if ((sentlen = send(succ.peer_fd, &msg, sizeof(msg), 0)) < 0) {
+    perror("forward_content send header"); exit(-1);
+  }
+
+  if ((sentlen = send(succ.peer_fd, content, msg.size, 0)) < 0) {
+    perror("forward_content send content"); exit(-1);
+  }
+}
 
 // Note: Also opens a new connection with the given sockaddr
 void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_debug_id) {
@@ -162,6 +184,30 @@ int main(int argc, char *argv[]) {
                 update_peer_data(&pred, update_msg.pred_server, update_msg.pred_debug_id);
                 break;
               }
+              case ADD_CONTENT: {
+                msg_add_content content_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
+                          sizeof(content_msg) - sizeof(msg_header));
+                char content[content_msg.size];
+                read_sock(client_sockfd, content, sizeof(content));
+
+                if (content_msg.id == 0) {
+                  numContent++;
+                  content_msg.id = nextId++;
+                  forward_counts();
+                  INFO_YELLOW("Received content %i: %s\n", content_msg.id, content);
+                }
+
+                unsigned int maxItemsHeld = uint_ceil(numContent, numPeers);
+                if (content_map.size() < maxItemsHeld) {
+                  content_map[content_msg.id] = "";
+                  content_map[content_msg.id].assign(content, sizeof(content));
+                  INFO_YELLOW("Consumed content %d\n", content_msg.id);
+                } else {
+                  forward_content(content_msg, content);
+                }
+                break;
+              }
               case GET_INFO: {
                 INFO("  Predecessor: %i, Successor: %i\n", pred.peer_debug_id, succ.peer_debug_id);
                 msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id, numContent, numPeers, nextId};
@@ -187,10 +233,7 @@ int main(int argc, char *argv[]) {
                   }
                   INFO("Setting succ to %i (fd: %i)\n", succ.peer_debug_id, succ.peer_fd);
 
-                  state[AWAITING_COUNTS_RETURN] = 1;
-                  msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
-                  send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
-
+                  forward_counts();
                   state[AWAITING_INSERTION] = false;
                 }
                 break;

@@ -16,6 +16,8 @@ typedef enum {
   FORWARD_PING,
   FORWARD_COUNTS,
   PRED_REMOVAL,
+  ADD_CONTENT,
+  FORWARD_CONTENT,
   ACK, // No purpose, just debugging
 } msg_type;
 
@@ -31,6 +33,8 @@ char* msg_type_to_str(msg_type type) {
     case FORWARD_PING: return (char *) "FORWARD_PING";
     case FORWARD_COUNTS: return (char *) "FORWARD_COUNTS";
     case PRED_REMOVAL: return (char *) "PRED_REMOVAL";
+    case ADD_CONTENT: return (char *) "ADD_CONTENT";
+    case FORWARD_CONTENT: return (char *) "FORWARD_CONTENT";
     case ACK: return (char *) "ACK";
     default: return (char *) "UNKNOWN";
   }
@@ -87,6 +91,12 @@ typedef struct {
   msg_header hdr;
 // Hold all the content that used to be on this peer
 } msg_pred_removal;
+
+typedef struct {
+  msg_header hdr;
+  unsigned long size;
+  unsigned int id;
+} msg_add_content;
 
 typedef struct {
   int peer_fd;
