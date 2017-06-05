@@ -4,3 +4,4 @@
 *.d
 *.idea
 cmake-build-debug
+.vscode

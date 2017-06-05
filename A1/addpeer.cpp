@@ -28,6 +28,17 @@ unsigned int uint_ceil(unsigned int n, unsigned int d) {
   return (n % d) ? n / d + 1 : n / d;
 }
 
+void print_content() {
+  if (content_map.size() == 0) {
+    INFO("No Content\n");
+  } else {
+    INFO("Content:\n");
+    for (std::map<unsigned int, std::string>::iterator it = content_map.begin(); it != content_map.end(); it++) {
+      INFO("Key: %i  |  Content: %s\n", it->first, (it->second).c_str());
+    }
+  }
+}
+
 void forward_counts() {
   if (succ.peer_fd == server_sockfd) return;
   state[AWAITING_COUNTS_RETURN] = 1;
@@ -280,6 +291,7 @@ int main(int argc, char *argv[]) {
               case START_PING: {
                 state[AWAITING_PING_RETURN] = 1;
                 INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
+                print_content();
                 if (succ.peer_fd != server_sockfd) {
                   msg_basic ping_msg = {{FORWARD_PING}};
                   send_sock(succ.peer_fd, (char*) &ping_msg, sizeof(ping_msg));
@@ -291,6 +303,7 @@ int main(int argc, char *argv[]) {
                   state[AWAITING_PING_RETURN] = 0;
                 } else {
                   INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
+                  print_content();
                   msg_basic ping_msg = {{FORWARD_PING}};
                   send_sock(succ.peer_fd, (char*) &ping_msg, sizeof(ping_msg));
                 }
