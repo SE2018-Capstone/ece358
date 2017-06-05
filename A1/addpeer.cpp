@@ -29,6 +29,7 @@ unsigned int uint_ceil(unsigned int n, unsigned int d) {
 }
 
 void forward_counts() {
+  if (succ.peer_fd == server_sockfd) return;
   state[AWAITING_COUNTS_RETURN] = 1;
   msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
   send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
