@@ -44,7 +44,18 @@ void forward_counts() {
   send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
 }
 
-void forward_content(msg_add_content msg, char* content) {
+void forward_content(msg_forward_content msg, const char* content) {
+  ssize_t sentlen;
+  if ((sentlen = send(succ.peer_fd, &msg, sizeof(msg), 0)) < 0) {
+    perror("forward_content send header"); exit(-1);
+  }
+
+  if ((sentlen = send(succ.peer_fd, content, msg.size, 0)) < 0) {
+    perror("forward_content send content"); exit(-1);
+  }
+}
+
+void forward_add_content(msg_add_content msg, const char* content) {
   ssize_t sentlen;
   if ((sentlen = send(succ.peer_fd, &msg, sizeof(msg), 0)) < 0) {
     perror("forward_content send header"); exit(-1);
@@ -214,7 +225,7 @@ int main(int argc, char *argv[]) {
                   content_map[content_msg.id].assign(content, sizeof(content));
                   INFO_YELLOW("Consumed content %d\n", content_msg.id);
                 } else {
-                  forward_content(content_msg, content);
+                  forward_add_content(content_msg, content);
                 }
                 break;
               }
@@ -229,9 +240,6 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, ((char *) &info_msg) + sizeof(msg_header),
                           sizeof(info_msg) - sizeof(msg_header));
                 if (state[AWAITING_INSERTION] == 1) {
-                  numContent = info_msg.numContent;
-                  numPeers = info_msg.numPeers + 1;
-                  nextId = info_msg.nextId;
                   pred = {client_sockfd, info_msg.server, info_msg.debug_id};
                   INFO("Setting pred to %i (fd: %i)\n", pred.peer_debug_id, pred.peer_fd);
                   if (!sockaddr_equals(pred.peer_server, info_msg.succ_server)) {
@@ -243,8 +251,72 @@ int main(int argc, char *argv[]) {
                   }
                   INFO("Setting succ to %i (fd: %i)\n", succ.peer_debug_id, succ.peer_fd);
 
+                  numContent = info_msg.numContent;
+                  numPeers = info_msg.numPeers + 1;
+                  nextId = info_msg.nextId;
+                  unsigned int numRequested = numContent / (numPeers);
+                  unsigned int numAboveMin = numContent % numPeers;
+                  unsigned int numMin = numPeers - numAboveMin;
+                  unsigned int maxsAboveMax = (uint_ceil(numContent, numPeers) - uint_ceil(numContent, numPeers + 1)) * numAboveMin;
+                  unsigned int minsAboveMax = ((numContent / numPeers) - uint_ceil(numContent, numPeers + 1)) * numMin;
+                  unsigned int reservedRequests = maxsAboveMax + ((minsAboveMax > 0) ? minsAboveMax : 0);
+
                   forward_counts();
+                  if (numRequested > 0) {
+                    state[REQUESTING_CONTENT] = numRequested;
+                    msg_request_content request_msg = {{REQUEST_CONTENT}, numRequested, reservedRequests};
+                    send_sock(succ.peer_fd, (char*) &request_msg, sizeof(request_msg));
+                  }
                   state[AWAITING_INSERTION] = false;
+                }
+                break;
+              }
+              case REQUEST_CONTENT: {
+                msg_request_content request_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &request_msg) + sizeof(msg_header),
+                          sizeof(request_msg) - sizeof(msg_header));
+                unsigned int numItemsIHold = content_map.size();
+                std::map<unsigned int, std::string>::iterator it = content_map.begin();
+                for (int i = 0; i < numItemsIHold - uint_ceil(numContent, numPeers); i++) {
+                  unsigned int key = it->first;
+                  std::string val = it->second;
+                  it = content_map.erase(it);
+                  unsigned int size = (unsigned int) val.size();
+                  msg_forward_content forward_msg = {{FORWARD_CONTENT}, key, size};
+                  forward_content(forward_msg, val.c_str());
+                  request_msg.reservedRequests--;
+                  request_msg.numRequested--;
+                }
+
+                if (request_msg.numRequested - request_msg.reservedRequests > 0 && numItemsIHold > (numContent / numPeers)) {
+                  unsigned int key = it->first;
+                  std::string val = it->second;
+                  it = content_map.erase(it);
+                  request_msg.numRequested--;
+                  unsigned int size = (unsigned int) val.size();
+                  msg_forward_content forward_msg = {{FORWARD_CONTENT}, key, size};
+                  forward_content(forward_msg, val.c_str());
+                }
+
+                if (request_msg.numRequested > 0) {
+                  send_sock(succ.peer_fd, (char*) &request_msg, sizeof(request_msg));
+                }
+                break;
+              }
+              case FORWARD_CONTENT: {
+                msg_forward_content content_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
+                          sizeof(content_msg) - sizeof(msg_header));
+                char content[content_msg.size];
+                read_sock(client_sockfd, content, sizeof(content));
+
+                if (state[REQUESTING_CONTENT] > 0) {
+                  content_map[content_msg.id] = "";
+                  content_map[content_msg.id].assign(content, sizeof(content));
+                  INFO_YELLOW("Consumed content %d\n", content_msg.id);
+                  state[REQUESTING_CONTENT]--;
+                } else {
+                  forward_content(content_msg, content);
                 }
                 break;
               }
@@ -265,7 +337,6 @@ int main(int argc, char *argv[]) {
               }
               case PRED_REMOVAL: {
                 numPeers = numPeers - 1;
-
                 state[AWAITING_COUNTS_RETURN] = 1;
                 msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
                 send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
