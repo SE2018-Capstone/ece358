@@ -13,9 +13,10 @@ OBJS_ADDPEER	= addpeer.o
 OBJS_REMOVEPEER	= removepeer.o
 OBJS_PING	= ping.o
 OBJS_ADDCONTENT	= addcontent.o
+OBJS_LOOKUPCONTENT	= lookupcontent.o
 OBJS_ALLKEYS = allkeys.o
 OBJS_REMOVECONTENT	= removecontent.o
-TARGETS= addpeer removepeer ping addcontent removecontent allkeys
+TARGETS= addpeer removepeer ping addcontent removecontent lookupcontent allkeys
 
 all: ${TARGETS}
 
@@ -32,6 +33,9 @@ ping: $(OBJS_LIB) $(OBJS_PING)
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
 addcontent: $(OBJS_LIB) $(OBJS_ADDCONTENT) 
+	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
+
+lookupcontent: $(OBJS_LIB) $(OBJS_LOOKUPCONTENT) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
 allkeys: $(OBJS_LIB) $(OBJS_ALLKEYS)

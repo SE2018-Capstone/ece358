@@ -23,6 +23,8 @@ typedef enum {
   FORWARD_COUNTS,
   PRED_REMOVAL,
   ADD_CONTENT,
+  LOOKUP_CONTENT,
+  FORWARD_LOOKUP_CONTENT,
   GET_CONTENT_KEYS,
   REMOVE_CONTENT,
   REMOVE_FINISHED,
@@ -45,6 +47,8 @@ char* msg_type_to_str(msg_type type) {
     case FORWARD_COUNTS: return (char *) "FORWARD_COUNTS";
     case PRED_REMOVAL: return (char *) "PRED_REMOVAL";
     case ADD_CONTENT: return (char *) "ADD_CONTENT";
+    case FORWARD_LOOKUP_CONTENT: return (char *) "FORWARD_LOOKUP_CONTENT";
+    case LOOKUP_CONTENT: return (char *) "LOOKUP_CONTENT";
     case GET_CONTENT_KEYS: return (char *) "GET_CONTENT_KEYS";
     case REMOVE_CONTENT: return (char *) "REMOVE_CONTENT";
     case REMOVE_FINISHED: return (char *) "REMOVE_FINISHED";
@@ -60,6 +64,7 @@ typedef enum {
   AWAITING_INSERTION,
   AWAITING_PING_RETURN,
   AWAITING_COUNTS_RETURN,
+  AWAITING_LOOKUPCONTENT_RETURN,
   AWAITING_REMOVE_RETURN,
   AWAITING_ADDCONTENT_RETURN,
   REMOVER,
@@ -69,6 +74,7 @@ typedef enum {
 
 typedef enum {
   ADDCONTENT_SOCKFD,
+  LOOKUPCONTENT_SOCKFD,
   REMOVECONTENT_SOCKFD,
   MAX_STATE_DATA,
 } peer_state_data;
@@ -130,6 +136,12 @@ typedef struct {
   unsigned long size;
   unsigned int id;
 } msg_forward_content;
+
+typedef struct {
+  msg_header hdr;
+  unsigned long size;
+  unsigned int id;
+} msg_get_content;
 
 typedef struct {
   msg_header hdr;

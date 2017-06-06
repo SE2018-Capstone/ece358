@@ -1,4 +1,5 @@
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -61,6 +62,15 @@ void forward_content(msg_forward_content msg, const char* content) {
 }
 
 void forward_add_content(msg_add_content msg, const char* content) {
+  if (send(succ.peer_fd, &msg, sizeof(msg), 0) < 0) {
+    perror("forward_content send header"); exit(-1);
+  }
+  if (msg.size > 0 && send(succ.peer_fd, content, msg.size, 0) < 0) {
+    perror("forward_content send content"); exit(-1);
+  }
+}
+
+void forward_get_content(msg_get_content msg, const char* content) {
   if (send(succ.peer_fd, &msg, sizeof(msg), 0) < 0) {
     perror("forward_content send header"); exit(-1);
   }
@@ -252,6 +262,58 @@ int main(int argc, char *argv[]) {
                   send_sock(data[ADDCONTENT_SOCKFD], (char *) &(return_msg.id), sizeof(return_msg.id));
                 } else {
                   send_sock(succ.peer_fd, (char *) &(return_msg), sizeof(return_msg));
+                }
+                break;
+              }
+              case LOOKUP_CONTENT: {
+                msg_get_content content_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
+                          sizeof(content_msg) - sizeof(msg_header));
+
+                INFO_YELLOW("Content key to lookup is: %d\n", content_msg.id);
+                if (content_map.count(content_msg.id) == 1) {
+                  std::string content = content_map.at(content_msg.id);
+                  content_msg.size = strlen(content.c_str()) + 1;
+
+                  send_sock(client_sockfd, (char *) &(content_msg.size), sizeof(unsigned long));
+                  char c[content_msg.size];
+                  std::strcpy(c, content.c_str());
+                  send_sock(client_sockfd, c, sizeof(c));
+                } else {
+                  state[AWAITING_LOOKUPCONTENT_RETURN] = 1;
+                  data[LOOKUPCONTENT_SOCKFD] = client_sockfd;
+                  content_msg.hdr = {FORWARD_LOOKUP_CONTENT};
+                  forward_get_content(content_msg, "");
+                }
+                break;
+              }
+              case FORWARD_LOOKUP_CONTENT: {
+                msg_get_content content_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
+                          sizeof(content_msg) - sizeof(msg_header));
+
+                if (state[AWAITING_LOOKUPCONTENT_RETURN] == 1) {
+                  state[AWAITING_LOOKUPCONTENT_RETURN] = 0;
+                  send_sock(data[LOOKUPCONTENT_SOCKFD], (char *) &(content_msg.size), sizeof(unsigned long));
+                  if (content_msg.size > 0) {
+                    char content[content_msg.size];
+                    read_sock(client_sockfd, content, sizeof(content));
+                    send_sock(data[LOOKUPCONTENT_SOCKFD], content, sizeof(content));
+                  }
+                } else {
+                  if (content_msg.size > 0) {
+                    char content[content_msg.size];
+                    read_sock(client_sockfd, content, sizeof(content));
+                    forward_get_content(content_msg, content);
+                  } else {
+                    std::string content = "";
+                    INFO_YELLOW("Content key to lookup is: %d\n", content_msg.id);
+                    if (content_map.count(content_msg.id) == 1) {
+                      content = content_map.at(content_msg.id);
+                      content_msg.size = strlen(content.c_str()) + 1;
+                    }
+                    forward_get_content(content_msg, content.c_str());
+                  }
                 }
                 break;
               }
