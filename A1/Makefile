@@ -13,23 +13,23 @@ OBJS_ADDPEER	= addpeer.o
 OBJS_REMOVEPEER	= removepeer.o
 OBJS_PING	= ping.o
 OBJS_ADDCONTENT	= addcontent.o
-TARGETS= addpeer.out removepeer.out ping.out addcontent.out
+TARGETS= addpeer removepeer ping addcontent
 
 all: ${TARGETS}
 
 debug: CPPFLAGS += -DDEBUG -g
 debug: ${TARGETS}
 
-addpeer.out: $(OBJS_LIB) $(OBJS_ADDPEER) 
+addpeer: $(OBJS_LIB) $(OBJS_ADDPEER) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
-removepeer.out: $(OBJS_LIB) $(OBJS_REMOVEPEER) 
+removepeer: $(OBJS_LIB) $(OBJS_REMOVEPEER) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
-ping.out: $(OBJS_LIB) $(OBJS_PING) 
+ping: $(OBJS_LIB) $(OBJS_PING) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
-addcontent.out: $(OBJS_LIB) $(OBJS_ADDCONTENT) 
+addcontent: $(OBJS_LIB) $(OBJS_ADDCONTENT) 
 	$(LD) -o $@ $^ $(LDLIBS) $(LDFLAGS) 
 
 %.o: %.cpp

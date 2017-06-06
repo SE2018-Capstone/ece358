@@ -6,6 +6,12 @@
 #define A1_STRUCTS_H
 #include <arpa/inet.h>
 
+typedef struct {
+  int peer_fd;
+  struct sockaddr_in peer_server;
+  int peer_debug_id;
+} peer_data;
+
 typedef enum {
   KILL,
   UPDATE_SUCC,
@@ -18,6 +24,7 @@ typedef enum {
   PRED_REMOVAL,
   ADD_CONTENT,
   FORWARD_CONTENT,
+  REQUEST_CONTENT,
   ACK, // No purpose, just debugging
 } msg_type;
 
@@ -35,6 +42,7 @@ char* msg_type_to_str(msg_type type) {
     case PRED_REMOVAL: return (char *) "PRED_REMOVAL";
     case ADD_CONTENT: return (char *) "ADD_CONTENT";
     case FORWARD_CONTENT: return (char *) "FORWARD_CONTENT";
+    case REQUEST_CONTENT: return (char *) "REQUEST_CONTENT";
     case ACK: return (char *) "ACK";
     default: return (char *) "UNKNOWN";
   }
@@ -44,6 +52,7 @@ typedef enum {
   AWAITING_INSERTION,
   AWAITING_PING_RETURN,
   AWAITING_COUNTS_RETURN,
+  REQUESTING_CONTENT,
   MAX_STATES
 } peer_states;
 
@@ -99,10 +108,16 @@ typedef struct {
 } msg_add_content;
 
 typedef struct {
-  int peer_fd;
-  struct sockaddr_in peer_server;
-  int peer_debug_id;
-} peer_data;
+  msg_header hdr;
+  unsigned long size;
+  unsigned int id;
+} msg_forward_content;
+
+typedef struct {
+  msg_header hdr;
+  unsigned int numRequested;
+  unsigned int reservedRequests;
+} msg_request_content;
 
 
 

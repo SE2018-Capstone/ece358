@@ -28,15 +28,13 @@ unsigned int uint_ceil(unsigned int n, unsigned int d) {
   return (n % d) ? n / d + 1 : n / d;
 }
 
-void print_content() {
-  if (content_map.size() == 0) {
-    INFO("No Content\n");
-  } else {
-    INFO("Content:\n");
-    for (std::map<unsigned int, std::string>::iterator it = content_map.begin(); it != content_map.end(); it++) {
-      INFO("Key: %i  |  Content: %s\n", it->first, (it->second).c_str());
-    }
+void print_info() {
+  fprintf(stderr, "\x1b[34m      Pred: %i, Succ: %i, Content: [", pred.peer_debug_id, succ.peer_debug_id);
+  for (std::map<unsigned int, std::string>::iterator it = content_map.begin(); it != content_map.end();) {
+    fprintf(stderr, "(%i, %.3s%s)", it->first, (it->second).c_str(), (it->second).size() > 3 ? "…" : "");
+    if (++it != content_map.end()) fprintf(stderr, ", ");
   }
+  fprintf(stderr, "]\n\x1b[0m");
 }
 
 void forward_counts() {
@@ -46,13 +44,20 @@ void forward_counts() {
   send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
 }
 
-void forward_content(msg_add_content msg, char* content) {
-  ssize_t sentlen;
-  if ((sentlen = send(succ.peer_fd, &msg, sizeof(msg), 0)) < 0) {
+void forward_content(msg_forward_content msg, const char* content) {
+  if (send(succ.peer_fd, &msg, sizeof(msg), 0) < 0) {
     perror("forward_content send header"); exit(-1);
   }
+  if (send(succ.peer_fd, content, msg.size, 0) < 0) {
+    perror("forward_content send content"); exit(-1);
+  }
+}
 
-  if ((sentlen = send(succ.peer_fd, content, msg.size, 0)) < 0) {
+void forward_add_content(msg_add_content msg, const char* content) {
+  if (send(succ.peer_fd, &msg, sizeof(msg), 0) < 0) {
+    perror("forward_content send header"); exit(-1);
+  }
+  if (send(succ.peer_fd, content, msg.size, 0) < 0) {
     perror("forward_content send content"); exit(-1);
   }
 }
@@ -90,7 +95,7 @@ void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_deb
 
 int main(int argc, char *argv[]) {
   srand ( time(NULL) );
-  debug_id = rand() % 1000;
+  debug_id = rand() % 980 + 20;
   memset(&state, 0, sizeof(state));
 
   int peer_sockfd = -1;
@@ -217,12 +222,12 @@ int main(int argc, char *argv[]) {
                   content_map[content_msg.id].assign(content, sizeof(content));
                   INFO_YELLOW("Consumed content %d\n", content_msg.id);
                 } else {
-                  forward_content(content_msg, content);
+                  forward_add_content(content_msg, content);
                 }
                 break;
               }
               case GET_INFO: {
-                INFO("  Predecessor: %i, Successor: %i\n", pred.peer_debug_id, succ.peer_debug_id);
+                print_info();
                 msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id, numContent, numPeers, nextId};
                 send_sock(client_sockfd, (char *) &msg, sizeof(msg));
                 break;
@@ -232,9 +237,6 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, ((char *) &info_msg) + sizeof(msg_header),
                           sizeof(info_msg) - sizeof(msg_header));
                 if (state[AWAITING_INSERTION] == 1) {
-                  numContent = info_msg.numContent;
-                  numPeers = info_msg.numPeers + 1;
-                  nextId = info_msg.nextId;
                   pred = {client_sockfd, info_msg.server, info_msg.debug_id};
                   INFO("Setting pred to %i (fd: %i)\n", pred.peer_debug_id, pred.peer_fd);
                   if (!sockaddr_equals(pred.peer_server, info_msg.succ_server)) {
@@ -246,8 +248,68 @@ int main(int argc, char *argv[]) {
                   }
                   INFO("Setting succ to %i (fd: %i)\n", succ.peer_debug_id, succ.peer_fd);
 
+                  numContent = info_msg.numContent;
+                  numPeers = info_msg.numPeers;
+                  nextId = info_msg.nextId;
+                  unsigned int numRequested = numContent / (numPeers + 1);
+                  unsigned int numAboveMin = numContent % numPeers;
+                  unsigned int numMin = numPeers - numAboveMin;
+                  unsigned int maxsAboveMax = (uint_ceil(numContent, numPeers) - uint_ceil(numContent, numPeers + 1)) * numAboveMin;
+                  unsigned int minsAboveMax = ((numContent / numPeers) - uint_ceil(numContent, numPeers + 1)) * numMin;
+                  unsigned int reservedRequests = maxsAboveMax + ((minsAboveMax > 0) ? minsAboveMax : 0);
+                  numPeers = numPeers + 1;
+
                   forward_counts();
-                  state[AWAITING_INSERTION] = false;
+                  if (numRequested > 0) {
+                    state[REQUESTING_CONTENT] = numRequested;
+                    msg_request_content request_msg = {{REQUEST_CONTENT}, numRequested, reservedRequests};
+                    send_sock(succ.peer_fd, (char*) &request_msg, sizeof(request_msg));
+                  }
+                  state[AWAITING_INSERTION] = 0;
+                }
+                break;
+              }
+              case REQUEST_CONTENT: {
+                msg_request_content request_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &request_msg) + sizeof(msg_header),
+                          sizeof(request_msg) - sizeof(msg_header));
+                unsigned int numItemsIHold = content_map.size();
+                std::map<unsigned int, std::string>::iterator it = content_map.begin();
+
+                int shouldGoToFloor = request_msg.numRequested - request_msg.reservedRequests > 0 && numItemsIHold > (numContent / numPeers);
+                int numItemsToDonate = content_map.size() - uint_ceil(numContent, numPeers) + shouldGoToFloor;
+                for (int i = 0; i < numItemsToDonate; i++) {
+                  unsigned int key = it->first;
+                  std::string val = it->second;
+                  it = content_map.erase(it);
+                  unsigned int size = (unsigned int) val.size();
+                  msg_forward_content forward_msg = {{FORWARD_CONTENT}, size, key};
+                  forward_content(forward_msg, val.c_str());
+                  request_msg.numRequested--;
+                  if (i < numItemsIHold - uint_ceil(numContent, numPeers)) {
+                    request_msg.reservedRequests--;
+                  }
+                }
+
+                if (request_msg.numRequested > 0) {
+                  send_sock(succ.peer_fd, (char*) &request_msg, sizeof(request_msg));
+                }
+                break;
+              }
+              case FORWARD_CONTENT: {
+                msg_forward_content content_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
+                          sizeof(content_msg) - sizeof(msg_header));
+                char content[content_msg.size];
+                read_sock(client_sockfd, content, sizeof(content));
+
+                if (state[REQUESTING_CONTENT] > 0) {
+                  content_map[content_msg.id] = "";
+                  content_map[content_msg.id].assign(content, sizeof(content));
+                  INFO_YELLOW("Consumed forwarded content %d\n", content_msg.id);
+                  state[REQUESTING_CONTENT]--;
+                } else {
+                  forward_content(content_msg, content);
                 }
                 break;
               }
@@ -268,7 +330,6 @@ int main(int argc, char *argv[]) {
               }
               case PRED_REMOVAL: {
                 numPeers = numPeers - 1;
-
                 state[AWAITING_COUNTS_RETURN] = 1;
                 msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
                 send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
@@ -291,8 +352,7 @@ int main(int argc, char *argv[]) {
               }
               case START_PING: {
                 state[AWAITING_PING_RETURN] = 1;
-                INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
-                print_content();
+                print_info();
                 if (succ.peer_fd != server_sockfd) {
                   msg_basic ping_msg = {{FORWARD_PING}};
                   send_sock(succ.peer_fd, (char*) &ping_msg, sizeof(ping_msg));
@@ -303,8 +363,7 @@ int main(int argc, char *argv[]) {
                 if (state[AWAITING_PING_RETURN] == 1) {
                   state[AWAITING_PING_RETURN] = 0;
                 } else {
-                  INFO("Server: %s   |   Pred: %3i  |  Succ: %3i\n", sockaddr_to_str(server).c_str(), pred.peer_debug_id, succ.peer_debug_id);
-                  print_content();
+                  print_info();
                   msg_basic ping_msg = {{FORWARD_PING}};
                   send_sock(succ.peer_fd, (char*) &ping_msg, sizeof(ping_msg));
                 }
