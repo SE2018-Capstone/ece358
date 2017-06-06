@@ -17,7 +17,11 @@ peer_data succ;
 int server_sockfd;
 struct sockaddr_in server;
 int state[MAX_STATES];
+int data[MAX_STATE_DATA];
 std::vector<pollfd> poll_fds;
+
+unsigned int zero = 0;
+unsigned int one = 0;
 
 unsigned int numContent = 0;
 unsigned int numPeers = 1;
@@ -80,7 +84,7 @@ void update_peer_data(peer_data* data, struct sockaddr_in sockaddr, int peer_deb
   data->peer_debug_id = peer_debug_id;
   if (!sockaddr_equals(sockaddr, server)) {
     data->peer_fd = connect_to_peer(sockaddr);
-    poll_fds.push_back({data->peer_fd, POLLIN, 0});
+    poll_fds.push_back(pollfd{data->peer_fd, POLLIN, 0});
   } else {
     data->peer_fd = server_sockfd;
   }
@@ -100,6 +104,7 @@ int main(int argc, char *argv[]) {
   srand ( time(NULL) );
   debug_id = rand() % 980 + 20;
   memset(&state, 0, sizeof(state));
+  memset(&data, 0, sizeof(state));
 
   int peer_sockfd = -1;
   struct sockaddr_in peer_server;
@@ -144,7 +149,7 @@ int main(int argc, char *argv[]) {
     perror("listen"); return -1;
   }
 
-  poll_fds.push_back({server_sockfd, POLLIN, 0});
+  poll_fds.push_back(pollfd{server_sockfd, POLLIN, 0});
 
   if (peer_sockfd == -1) {
     daemonize(); // Job done, end addpeer.cpp
@@ -152,7 +157,7 @@ int main(int argc, char *argv[]) {
     // Begin process to connect to peers.  Once connected, updated counts will be forwarded,
     // and new content will be sent to this new peer.  Once that entire process is done,
     // daemonize() will be called to end addpeer.cpp.
-    poll_fds.push_back({peer_sockfd, POLLIN, 0});
+    poll_fds.push_back(pollfd{peer_sockfd, POLLIN, 0});
 
     msg_basic get_info_msg = {{GET_INFO}};
     state[AWAITING_INSERTION] = 1;
@@ -182,7 +187,7 @@ int main(int argc, char *argv[]) {
 
           INFO("Connection accepted from %s\n", sockfd_to_str(client_sockfd).c_str());
 
-          poll_fds.push_back({client_sockfd, POLLIN, 0});
+          poll_fds.push_back(pollfd{client_sockfd, POLLIN, 0});
         } else {
           // Existing peer is sending data
           int client_sockfd = poll_fds[i].fd;
@@ -216,7 +221,8 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, content, sizeof(content));
 
                 if (content_msg.firstRequest) {
-                  state[AWAITING_ADDCONTENT_RETURN] = client_sockfd;
+                  state[AWAITING_ADDCONTENT_RETURN] =  1;
+                  data[ADDCONTENT_SOCKFD] = client_sockfd;
                   numContent++;
                   content_msg.id = nextId++;
                   forward_counts();
@@ -241,10 +247,9 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, ((char *) &return_msg) + sizeof(msg_header),
                           sizeof(return_msg) - sizeof(msg_header));
                 if (state[AWAITING_ADDCONTENT_RETURN] > 0) {
-                  int addcontentcpp_sockfd = state[AWAITING_ADDCONTENT_RETURN];
                   state[AWAITING_ADDCONTENT_RETURN] = 0;
                   INFO_GREEN("ADDCONTENT FINISHED\n");
-                  send_sock(addcontentcpp_sockfd, (char *) &(return_msg.id), sizeof(return_msg.id));
+                  send_sock(data[ADDCONTENT_SOCKFD], (char *) &(return_msg.id), sizeof(return_msg.id));
                 } else {
                   send_sock(succ.peer_fd, (char *) &(return_msg), sizeof(return_msg));
                 }
@@ -268,10 +273,9 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, ((char *) &remove_msg) + sizeof(msg_header),
                           sizeof(remove_msg) - sizeof(msg_header));
                 if (state[AWAITING_REMOVE_RETURN]) {
-                  // Success!
-                  int thisisone = 1;
-                  send_sock(state[AWAITING_REMOVE_RETURN], (char *) &thisisone, sizeof(int));
                   state[AWAITING_REMOVE_RETURN] = 0;
+                  INFO_GREEN("REMOVECONTENT FINISHED");
+                  send_sock(data[REMOVECONTENT_SOCKFD], (char *) &one, sizeof(one));
                 } else {
                   send_sock(succ.peer_fd, (char*) &remove_msg, sizeof(remove_msg));
                 }
@@ -282,15 +286,16 @@ int main(int argc, char *argv[]) {
                 read_sock(client_sockfd, ((char *) &remove_msg) + sizeof(msg_header),
                           sizeof(remove_msg) - sizeof(msg_header));
                 if (remove_msg.firstRequest) {
-                  state[AWAITING_REMOVE_RETURN] = client_sockfd;
+                  state[AWAITING_REMOVE_RETURN] = 1;
+                  data[REMOVECONTENT_SOCKFD] = client_sockfd;
                   INFO_YELLOW("Waiting for remove to return\n");
                 } else if (state[AWAITING_REMOVE_RETURN]) {
                   // The lookup for the item failed
                   // Report error to client
                   INFO_YELLOW("Remove couldnt find anything\n");
-                  int thisiszero = 0;
-                  send_sock(state[AWAITING_REMOVE_RETURN], (char *) &thisiszero, sizeof(int));
                   state[AWAITING_REMOVE_RETURN] = 0;
+                  INFO_GREEN("REMOVECONTENT FINISHED");
+                  send_sock(data[REMOVECONTENT_SOCKFD], (char *) &zero, sizeof(zero));
                   break;
                 }
                 if (content_map.count(remove_msg.id)) {
@@ -373,7 +378,7 @@ int main(int argc, char *argv[]) {
                 for (int i = 0; i < numItemsToDonate; i++) {
                   unsigned int key = it->first;
                   std::string val = it->second;
-                  it = content_map.erase(it);
+                  content_map.erase(it++);
                   unsigned int size = (unsigned int) val.size();
                   msg_forward_content forward_msg = {{FORWARD_CONTENT}, size, key};
                   forward_content(forward_msg, val.c_str());

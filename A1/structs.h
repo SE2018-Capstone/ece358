@@ -67,6 +67,12 @@ typedef enum {
   MAX_STATES
 } peer_states;
 
+typedef enum {
+  ADDCONTENT_SOCKFD,
+  REMOVECONTENT_SOCKFD,
+  MAX_STATE_DATA,
+} peer_state_data;
+
 typedef struct {
   msg_type type;
 } msg_header;
