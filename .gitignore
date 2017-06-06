@@ -5,3 +5,10 @@
 *.idea
 cmake-build-debug
 .vscode
+addpeer
+removepeer
+addcontent
+removecontent
+lookupcontent
+allkeys
+ping
