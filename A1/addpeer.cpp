@@ -1,3 +1,4 @@
+#include <cstring>
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -272,7 +273,8 @@ int main(int argc, char *argv[]) {
 
                 INFO_YELLOW("Content key to lookup is: %d\n", content_msg.id);
                 if (content_map.count(content_msg.id) == 1) {
-                  std::string content = content_map.at(content_msg.id);
+                  std::string content = "";
+                  content = content_map.at(content_msg.id);
                   content_msg.size = strlen(content.c_str()) + 1;
 
                   send_sock(client_sockfd, (char *) &(content_msg.size), sizeof(unsigned long));
