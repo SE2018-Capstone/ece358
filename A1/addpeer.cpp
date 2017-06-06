@@ -208,6 +208,7 @@ int main(int argc, char *argv[]) {
                   content_msg.id = nextId++;
                   forward_counts();
                   INFO_YELLOW("Received content %i: %s\n", content_msg.id, content);
+                  send_sock(client_sockfd, (char *) &(content_msg.id), sizeof(unsigned int));
                 }
 
                 unsigned int maxItemsHeld = uint_ceil(numContent, numPeers);

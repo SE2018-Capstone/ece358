@@ -29,6 +29,9 @@ int main(int argc, char *argv[]) {
     perror("addcontent send content"); return -1;
   }
 
+  read_sock(peer_sockfd, (char *) &(add_content_msg.id), sizeof(unsigned int));
+  printf("%d\n", add_content_msg.id);
+
   if(shutdown(peer_sockfd, SHUT_RDWR) < 0) {
     perror("shutdown"); return -1;
   }
