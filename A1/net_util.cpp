@@ -35,6 +35,8 @@ int read_sock(int sockfd, char* buf, int requested_size) {
 	int bytes_received = 0;
 	while (bytes_received < requested_size) {
 		if((recvlen = recv(sockfd, buf + bytes_received, requested_size - bytes_received, 0)) < 0) {
+      int err = errno;
+			if ((err == EAGAIN) || (err == EWOULDBLOCK)) continue;
 			perror("recv");
 			exit(-1);
 		} else if (recvlen == 0) {

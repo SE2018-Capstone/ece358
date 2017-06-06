@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "net_util.h"
 #include "structs.h"
@@ -29,7 +30,7 @@ int main(int argc, char *argv[]) {
     perror("addcontent send content"); return -1;
   }
 
-  if(shutdown(peer_sockfd, SHUT_RDWR) < 0) {
-    perror("shutdown"); return -1;
+  if(close(peer_sockfd) < 0) {
+    perror("close"); return -1;
   }
 }
