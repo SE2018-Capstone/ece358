@@ -549,9 +549,7 @@ int main(int argc, char *argv[]) {
               }
               case PRED_REMOVAL: {
                 numPeers = numPeers - 1;
-                state[AWAITING_COUNTS_RETURN] = 1;
-                msg_counts counts_msg = {{FORWARD_COUNTS}, numContent, numPeers, nextId};
-                send_sock(succ.peer_fd, (char*) &counts_msg, sizeof(counts_msg));
+                forward_counts();
                 break;
               }
               case FORWARD_COUNTS: {
