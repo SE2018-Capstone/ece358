@@ -215,12 +215,12 @@ int main(int argc, char *argv[]) {
                 char content[content_msg.size];
                 read_sock(client_sockfd, content, sizeof(content));
 
-                if (content_msg.id == 0) {
+                if (content_msg.firstRequest) {
+                  state[AWAITING_ADDCONTENT_RETURN] = client_sockfd;
                   numContent++;
                   content_msg.id = nextId++;
                   forward_counts();
                   INFO_YELLOW("Received content %i: %s\n", content_msg.id, content);
-                  send_sock(client_sockfd, (char *) &(content_msg.id), sizeof(unsigned int));
                 }
 
                 unsigned int maxItemsHeld = uint_ceil(numContent, numPeers);
@@ -228,8 +228,25 @@ int main(int argc, char *argv[]) {
                   content_map[content_msg.id] = "";
                   content_map[content_msg.id].assign(content, sizeof(content));
                   INFO_YELLOW("Consumed content %d\n", content_msg.id);
+                  msg_addcontent_return return_msg = {{ADD_CONTENT_FINISHED}, content_msg.id};
+                  send_sock(succ.peer_fd, (char*) &return_msg, sizeof(return_msg));
                 } else {
+                  content_msg.firstRequest = false;
                   forward_add_content(content_msg, content);
+                }
+                break;
+              }
+              case ADD_CONTENT_FINISHED: {
+                msg_addcontent_return return_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &return_msg) + sizeof(msg_header),
+                          sizeof(return_msg) - sizeof(msg_header));
+                if (state[AWAITING_ADDCONTENT_RETURN] > 0) {
+                  int addcontentcpp_sockfd = state[AWAITING_ADDCONTENT_RETURN];
+                  state[AWAITING_ADDCONTENT_RETURN] = 0;
+                  INFO_GREEN("ADDCONTENT FINISHED\n");
+                  send_sock(addcontentcpp_sockfd, (char *) &(return_msg.id), sizeof(return_msg.id));
+                } else {
+                  send_sock(succ.peer_fd, (char *) &(return_msg), sizeof(return_msg));
                 }
                 break;
               }

@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
 
   struct sockaddr_in peer_server = create_sockaddr_in(argv[1], htons(atoi(argv[2])));
   int peer_sockfd = connect_to_peer(peer_server);
-  msg_add_content add_content_msg = {{ADD_CONTENT}, strlen(argv[3]) + 1, 0};
+  msg_add_content add_content_msg = {{ADD_CONTENT}, strlen(argv[3]) + 1, 0, true};
   ssize_t sentlen;
   if ((sentlen = send(peer_sockfd, &add_content_msg, sizeof(add_content_msg), 0)) < 0) {
     perror("addcontent send header"); return -1;

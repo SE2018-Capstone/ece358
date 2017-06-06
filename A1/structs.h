@@ -28,6 +28,7 @@ typedef enum {
   REMOVE_FINISHED,
   FORWARD_CONTENT,
   REQUEST_CONTENT,
+  ADD_CONTENT_FINISHED,
   ACK, // No purpose, just debugging
 } msg_type;
 
@@ -49,6 +50,7 @@ char* msg_type_to_str(msg_type type) {
     case REMOVE_FINISHED: return (char *) "REMOVE_FINISHED";
     case FORWARD_CONTENT: return (char *) "FORWARD_CONTENT";
     case REQUEST_CONTENT: return (char *) "REQUEST_CONTENT";
+    case ADD_CONTENT_FINISHED: return (char *) "ADD_CONTENT_FINISHED";
     case ACK: return (char *) "ACK";
     default: return (char *) "UNKNOWN";
   }
@@ -59,6 +61,7 @@ typedef enum {
   AWAITING_PING_RETURN,
   AWAITING_COUNTS_RETURN,
   AWAITING_REMOVE_RETURN,
+  AWAITING_ADDCONTENT_RETURN,
   REMOVER,
   REQUESTING_CONTENT,
   MAX_STATES
@@ -113,6 +116,7 @@ typedef struct {
   msg_header hdr;
   unsigned long size;
   unsigned int id;
+  bool firstRequest;
 } msg_add_content;
 
 typedef struct {
@@ -132,6 +136,11 @@ typedef struct {
   unsigned int id;
   bool firstRequest;
 } msg_remove_content;
+
+typedef struct {
+  msg_header hdr;
+  unsigned int id;
+} msg_addcontent_return;
 
 typedef struct {
   msg_header hdr;
