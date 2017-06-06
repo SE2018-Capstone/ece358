@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
   int is_success;
   read_sock(peer_sockfd, (char *) &is_success, sizeof(int));
   if (!is_success) {
-    printf("Error: no such content");
+    printf("Error: no such content\n");
   }
 
   if(shutdown(peer_sockfd, SHUT_RDWR) < 0) {

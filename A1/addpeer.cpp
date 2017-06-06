@@ -30,12 +30,14 @@ unsigned int uint_ceil(unsigned int n, unsigned int d) {
 }
 
 void print_info() {
+#ifdef DEBUG
   fprintf(stderr, "\x1b[34m      Pred: %i, Succ: %i, Content: [", pred.peer_debug_id, succ.peer_debug_id);
   for (std::map<unsigned int, std::string>::iterator it = content_map.begin(); it != content_map.end();) {
     fprintf(stderr, "(%i, %.3s%s)", it->first, (it->second).c_str(), (it->second).size() > 3 ? "…" : "");
     if (++it != content_map.end()) fprintf(stderr, ", ");
   }
   fprintf(stderr, "]\n\x1b[0m");
+#endif
 }
 
 void forward_counts() {
@@ -246,27 +248,28 @@ int main(int argc, char *argv[]) {
                           sizeof(remove_msg) - sizeof(msg_header));
                 if (state[AWAITING_REMOVE_RETURN]) {
                   // Success!
-                  state[AWAITING_REMOVE_RETURN] = 0;
                   int thisisone = 1;
-                  send_sock(client_sockfd, (char *) &thisisone, sizeof(thisisone));
+                  send_sock(state[AWAITING_REMOVE_RETURN], (char *) &thisisone, sizeof(int));
+                  state[AWAITING_REMOVE_RETURN] = 0;
                 } else {
                   send_sock(succ.peer_fd, (char*) &remove_msg, sizeof(remove_msg));
                 }
+                break;
               }
               case REMOVE_CONTENT: {
                 msg_remove_content remove_msg = {hdr};
                 read_sock(client_sockfd, ((char *) &remove_msg) + sizeof(msg_header),
                           sizeof(remove_msg) - sizeof(msg_header));
                 if (remove_msg.firstRequest) {
-                  state[AWAITING_REMOVE_RETURN] = 1;
+                  state[AWAITING_REMOVE_RETURN] = client_sockfd;
                   INFO_YELLOW("Waiting for remove to return\n");
                 } else if (state[AWAITING_REMOVE_RETURN]) {
                   // The lookup for the item failed
                   // Report error to client
-                  state[AWAITING_REMOVE_RETURN] = 0;
-                  INFO_YELLOW("ERROR REMOVE COULDNT FIND ANYTHING\n");
+                  INFO_YELLOW("Remove couldnt find anything\n");
                   int thisiszero = 0;
-                  send_sock(client_sockfd, (char *) &thisiszero, sizeof(thisiszero));
+                  send_sock(state[AWAITING_REMOVE_RETURN], (char *) &thisiszero, sizeof(int));
+                  state[AWAITING_REMOVE_RETURN] = 0;
                   break;
                 }
                 if (content_map.count(remove_msg.id)) {
@@ -293,6 +296,7 @@ int main(int argc, char *argv[]) {
                   remove_msg.firstRequest = false;
                   send_sock(succ.peer_fd, (char*) &remove_msg, sizeof(remove_msg));
                 }
+                break;
               }
               case GET_INFO: {
                 print_info();
