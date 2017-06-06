@@ -126,6 +126,8 @@ void daemonize() {
     fprintf(stderr, "Can't fork.");
     exit(1);
   } else if (pid == 0) { // child
+    close(1);
+    close(2);
     setsid(); // release from parent
     int pid2 = fork();
     if (pid2 < 0) fprintf(stderr, "Can't fork after releasing.\n");
