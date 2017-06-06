@@ -19,7 +19,7 @@ int main(int argc, char *argv[]) {
 
   struct sockaddr_in peer_server = create_sockaddr_in(argv[1], htons(atoi(argv[2])));
   int peer_sockfd = connect_to_peer(peer_server);
-  msg_remove_content remove_content_msg = {{REMOVE_CONTENT}, atoi(argv[3]), true};
+  msg_remove_content remove_content_msg = {{REMOVE_CONTENT}, (unsigned int) atoi(argv[3]), true};
   ssize_t sentlen;
   if ((sentlen = send(peer_sockfd, &remove_content_msg, sizeof(remove_content_msg), 0)) < 0) {
     perror("removecontent send header"); return -1;

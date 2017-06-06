@@ -136,7 +136,6 @@ int main(int argc, char *argv[]) {
 
   printf("%s %d\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
 
-  daemonize(); // must run outside of the tty
   pred = {server_sockfd, server, debug_id};
   succ = {server_sockfd, server, debug_id};
 
@@ -147,7 +146,12 @@ int main(int argc, char *argv[]) {
 
   poll_fds.push_back({server_sockfd, POLLIN, 0});
 
-  if (peer_sockfd != -1) {
+  if (peer_sockfd == -1) {
+    daemonize(); // Job done, end addpeer.cpp
+  } else {
+    // Begin process to connect to peers.  Once connected, updated counts will be forwarded,
+    // and new content will be sent to this new peer.  Once that entire process is done,
+    // daemonize() will be called to end addpeer.cpp.
     poll_fds.push_back({peer_sockfd, POLLIN, 0});
 
     msg_basic get_info_msg = {{GET_INFO}};
@@ -337,7 +341,6 @@ int main(int argc, char *argv[]) {
                     msg_request_content request_msg = {{REQUEST_CONTENT}, numRequested, reservedRequests};
                     send_sock(succ.peer_fd, (char*) &request_msg, sizeof(request_msg));
                   }
-                  state[AWAITING_INSERTION] = 0;
                 }
                 break;
               }
@@ -385,6 +388,10 @@ int main(int argc, char *argv[]) {
                     msg_remove_finished finished = {{REMOVE_FINISHED}};
                     send_sock(succ.peer_fd, (char*) &finished, sizeof(finished));
                   }
+                  if (!state[REQUESTING_CONTENT] && state[AWAITING_INSERTION]) {
+                    state[AWAITING_INSERTION] = 0;
+                    daemonize();
+                  }
                 } else {
                   forward_content(content_msg, content);
                 }
@@ -419,6 +426,10 @@ int main(int argc, char *argv[]) {
                 if (state[AWAITING_COUNTS_RETURN] == 1) {
                   INFO_YELLOW("Updated all counts:  numContent=%u, numPeers=%u, nextId=%u \n", numContent, numPeers, nextId);
                   state[AWAITING_COUNTS_RETURN] = 0;
+                  if (state[AWAITING_INSERTION] && !state[REQUESTING_CONTENT]) {
+                    state[AWAITING_INSERTION] = 0;
+                    daemonize(); // Can finally end addpeer.cpp's main process
+                  }
                 } else {
                   numContent = counts_msg.numContent;
                   numPeers = counts_msg.numPeers;

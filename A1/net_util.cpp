@@ -120,6 +120,7 @@ int fd_set_nonblocking(int fd) {
 
 // Taken from http://wiki.linuxquestions.org/wiki/Fork_off_and_die
 void daemonize() {
+	INFO_YELLOW("DAEMONIZING\n");
   int pid = fork();
   if (pid < 0) {
     fprintf(stderr, "Can't fork.");
