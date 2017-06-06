@@ -457,6 +457,22 @@ int main(int argc, char *argv[]) {
                 }
                 break;
               }
+              case BELOW_MIN_CONTENT: {
+                msg_forward_content content_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
+                          sizeof(content_msg) - sizeof(msg_header));
+                char content[content_msg.size];
+                read_sock(client_sockfd, content, sizeof(content));
+
+                if (content_map.size() < numContent/numPeers) {
+                  content_map[content_msg.id] = "";
+                  content_map[content_msg.id].assign(content, sizeof(content));
+                  INFO_YELLOW("Consumed forwarded content %d\n", content_msg.id);
+                } else {
+                  forward_content(content_msg, content);
+                }
+                break;
+              }
               case FORWARD_CONTENT: {
                 msg_forward_content content_msg = {hdr};
                 read_sock(client_sockfd, ((char *) &content_msg) + sizeof(msg_header),
@@ -485,6 +501,7 @@ int main(int argc, char *argv[]) {
               }
               case KILL: {
                 if (pred.peer_fd != server_sockfd) { // Only false if only 1 peer
+                  // Actual removal code
                   msg_update_pred update_pred_msg = {{UPDATE_PRED}, pred.peer_server, pred.peer_debug_id};
                   send_sock(succ.peer_fd, (char*) &update_pred_msg, sizeof(update_pred_msg));
                   msg_update_succ update_succ_msg = {{UPDATE_SUCC}, succ.peer_server, succ.peer_debug_id};
@@ -492,6 +509,38 @@ int main(int argc, char *argv[]) {
 
                   msg_pred_removal pred_removal_msg = {{PRED_REMOVAL}};
                   send_sock(succ.peer_fd, (char*) &pred_removal_msg, sizeof(pred_removal_msg));
+
+                  int peersBelowMin = numPeers-(numContent%numPeers);
+                  int peersAboveMin = numContent%numPeers;
+                  // Taking current peer out of equation
+                  if (content_map.size() > numContent/numPeers) {
+                    peersAboveMin--;
+                  } else {
+                    peersBelowMin--;
+                  }
+                  int numBelowMin = (numContent/(numPeers-1)-numContent/numPeers)*(peersBelowMin);
+                  int maxBelowMin = (numContent/(numPeers-1)-uint_ceil(numContent,numPeers))*(peersAboveMin);
+                  INFO("frst Below min %d\n", numBelowMin);
+                  INFO("max Below min %d\n", maxBelowMin);
+                  if (maxBelowMin > 0){
+                    numBelowMin += maxBelowMin;
+                  }
+                  INFO("Below min %d\n", numBelowMin);
+                  // Send content
+                  while (content_map.size()) {
+                    auto it = content_map.begin();
+                    unsigned int key = it->first;
+                    std::string val = it->second;
+                    msg_forward_content forward_msg;
+                    if (numBelowMin > 0) {
+                      forward_msg = {{BELOW_MIN_CONTENT}, val.length(), key};
+                      numBelowMin--;
+                    } else {
+                      forward_msg = {{ADD_CONTENT}, val.length(), key};
+                    }
+                    forward_content(forward_msg, val.c_str());
+                    content_map.erase(it);
+                  }
                 }
                 close(pred.peer_fd);
                 close(succ.peer_fd);

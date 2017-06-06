@@ -29,6 +29,7 @@ typedef enum {
   REMOVE_CONTENT,
   REMOVE_FINISHED,
   FORWARD_CONTENT,
+  BELOW_MIN_CONTENT,
   REQUEST_CONTENT,
   ADD_CONTENT_FINISHED,
   ACK, // No purpose, just debugging
@@ -53,6 +54,7 @@ char* msg_type_to_str(msg_type type) {
     case REMOVE_CONTENT: return (char *) "REMOVE_CONTENT";
     case REMOVE_FINISHED: return (char *) "REMOVE_FINISHED";
     case FORWARD_CONTENT: return (char *) "FORWARD_CONTENT";
+    case BELOW_MIN_CONTENT: return (char *) "BELOW_MIN_CONTENT";
     case REQUEST_CONTENT: return (char *) "REQUEST_CONTENT";
     case ADD_CONTENT_FINISHED: return (char *) "ADD_CONTENT_FINISHED";
     case ACK: return (char *) "ACK";
