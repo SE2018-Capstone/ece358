@@ -374,7 +374,7 @@ int main(int argc, char *argv[]) {
                 std::map<unsigned int, std::string>::iterator it = content_map.begin();
 
                 int shouldGoToFloor = request_msg.numRequested - request_msg.reservedRequests > 0 && numItemsIHold > (numContent / numPeers);
-                int numItemsToDonate = content_map.size() - uint_ceil(numContent, numPeers) + shouldGoToFloor;
+                int numItemsToDonate = (int) (content_map.size() - uint_ceil(numContent, numPeers) + shouldGoToFloor);
                 for (int i = 0; i < numItemsToDonate; i++) {
                   unsigned int key = it->first;
                   std::string val = it->second;
@@ -383,7 +383,7 @@ int main(int argc, char *argv[]) {
                   msg_forward_content forward_msg = {{FORWARD_CONTENT}, size, key};
                   forward_content(forward_msg, val.c_str());
                   request_msg.numRequested--;
-                  if (i < numItemsIHold - uint_ceil(numContent, numPeers)) {
+                  if (i < (int)(numItemsIHold - uint_ceil(numContent, numPeers))) {
                     request_msg.reservedRequests--;
                   }
                 }

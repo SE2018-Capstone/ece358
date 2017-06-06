@@ -41,7 +41,7 @@ def test02():
         # errors occurred
         test02_comments.extend(comments)
         # Kill test because no network was created
-        return (-1, test02_comments)
+        return (-1, test02_comments,test02_pos_grades)
     else:
         if not '127.0.0.1' in peer1:
             # not a Local ip address returned
@@ -58,7 +58,7 @@ def test02():
         # errors occurred
         test02_comments.extend(comments)
         # Kill test because no network was created
-        return (-1, test02_comments)
+        return (-1, test02_comments,test02_pos_grades)
     else:
         test02_grade += 1
         test02_pos_grades.append('+1 for addpeer/2 peers test')
@@ -101,7 +101,7 @@ def test02():
         # error occurred with allkeys!
         test02_comments.extend(c1)
         test02_comments.extend(c2)
-        return (test02_grade, test02_comments)
+        return (test02_grade, test02_comments,test02_pos_grades)
 
     # check if key_hello exists on peer1 or peer2
     if len(peer1_keys) == 1 and len(peer2_keys) == 0:
@@ -154,7 +154,7 @@ def test02():
         # error occurred with allkeys!
         test02_comments.extend(c1)
         test02_comments.extend(c2)
-        return (test02_grade, test02_comments)
+        return (test02_grade, test02_comments,test02_pos_grades)
 
     # check if key_hello and key_hello_world exists on peer1 and peer2
     combined_keys = peer1_keys + peer2_keys
