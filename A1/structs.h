@@ -24,6 +24,8 @@ typedef enum {
   PRED_REMOVAL,
   ADD_CONTENT,
   GET_CONTENT_KEYS,
+  REMOVE_CONTENT,
+  REMOVE_FINISHED,
   FORWARD_CONTENT,
   REQUEST_CONTENT,
   ACK, // No purpose, just debugging
@@ -43,6 +45,8 @@ char* msg_type_to_str(msg_type type) {
     case PRED_REMOVAL: return (char *) "PRED_REMOVAL";
     case ADD_CONTENT: return (char *) "ADD_CONTENT";
     case GET_CONTENT_KEYS: return (char *) "GET_CONTENT_KEYS";
+    case REMOVE_CONTENT: return (char *) "REMOVE_CONTENT";
+    case REMOVE_FINISHED: return (char *) "REMOVE_FINISHED";
     case FORWARD_CONTENT: return (char *) "FORWARD_CONTENT";
     case REQUEST_CONTENT: return (char *) "REQUEST_CONTENT";
     case ACK: return (char *) "ACK";
@@ -54,6 +58,8 @@ typedef enum {
   AWAITING_INSERTION,
   AWAITING_PING_RETURN,
   AWAITING_COUNTS_RETURN,
+  AWAITING_REMOVE_RETURN,
+  REMOVER,
   REQUESTING_CONTENT,
   MAX_STATES
 } peer_states;
@@ -121,6 +127,14 @@ typedef struct {
   unsigned int reservedRequests;
 } msg_request_content;
 
+typedef struct {
+  msg_header hdr;
+  unsigned int id;
+  bool firstRequest;
+} msg_remove_content;
 
+typedef struct {
+  msg_header hdr;
+} msg_remove_finished;
 
 #endif //A1_STRUCTS_H

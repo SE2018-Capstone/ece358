@@ -24,6 +24,7 @@ unsigned int numPeers = 1;
 unsigned int nextId = 1; // Id of 0 is reserved to determine whether msg_add_content is being forwarded or not
 std::map<unsigned int, std::string> content_map;
 
+// Dont need floor since n/d is floor
 unsigned int uint_ceil(unsigned int n, unsigned int d) {
   return (n % d) ? n / d + 1 : n / d;
 }
@@ -239,6 +240,60 @@ int main(int argc, char *argv[]) {
                 }
                 break;
               }
+              case REMOVE_FINISHED: {
+                msg_remove_finished remove_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &remove_msg) + sizeof(msg_header),
+                          sizeof(remove_msg) - sizeof(msg_header));
+                if (state[AWAITING_REMOVE_RETURN]) {
+                  // Success!
+                  state[AWAITING_REMOVE_RETURN] = 0;
+                  int thisisone = 1;
+                  send_sock(client_sockfd, (char *) &thisisone, sizeof(thisisone));
+                } else {
+                  send_sock(succ.peer_fd, (char*) &remove_msg, sizeof(remove_msg));
+                }
+              }
+              case REMOVE_CONTENT: {
+                msg_remove_content remove_msg = {hdr};
+                read_sock(client_sockfd, ((char *) &remove_msg) + sizeof(msg_header),
+                          sizeof(remove_msg) - sizeof(msg_header));
+                if (remove_msg.firstRequest) {
+                  state[AWAITING_REMOVE_RETURN] = 1;
+                  INFO_YELLOW("Waiting for remove to return\n");
+                } else if (state[AWAITING_REMOVE_RETURN]) {
+                  // The lookup for the item failed
+                  // Report error to client
+                  state[AWAITING_REMOVE_RETURN] = 0;
+                  INFO_YELLOW("ERROR REMOVE COULDNT FIND ANYTHING\n");
+                  int thisiszero = 0;
+                  send_sock(client_sockfd, (char *) &thisiszero, sizeof(thisiszero));
+                  break;
+                }
+                if (content_map.count(remove_msg.id)) {
+                  // This peer has the content to be removed
+                  content_map.erase(remove_msg.id);
+                  INFO_YELLOW("Removed content %i\n", remove_msg.id);
+                  numContent--;
+                  forward_counts();
+                  if (content_map.size() < numContent/numPeers) {
+                    state[REQUESTING_CONTENT] = 1;
+                    state[REMOVER] = 1;
+                    // Request 1 content since we are under floor
+                    unsigned int numRequests = 1;
+                    unsigned int reservedRequests = (uint_ceil(numContent+1,numPeers)-uint_ceil(numContent,numPeers))*((numContent+1)%numPeers);
+                    INFO("Requesting %i, with %i reserved\n", numRequests, reservedRequests);
+                    msg_request_content request_msg = {{REQUEST_CONTENT}, numRequests, reservedRequests};
+                    send_sock(succ.peer_fd, (char*) &request_msg, sizeof(request_msg));
+                  } else {
+                    msg_remove_finished finished = {{REMOVE_FINISHED}};
+                    send_sock(succ.peer_fd, (char*) &finished, sizeof(finished));
+                  }
+                } else {
+                  // Pass on remove content request
+                  remove_msg.firstRequest = false;
+                  send_sock(succ.peer_fd, (char*) &remove_msg, sizeof(remove_msg));
+                }
+              }
               case GET_INFO: {
                 print_info();
                 msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id, numContent, numPeers, nextId};
@@ -321,6 +376,11 @@ int main(int argc, char *argv[]) {
                   content_map[content_msg.id].assign(content, sizeof(content));
                   INFO_YELLOW("Consumed forwarded content %d\n", content_msg.id);
                   state[REQUESTING_CONTENT]--;
+                  if (!state[REQUESTING_CONTENT] && state[REMOVER]) {
+                    state[REMOVER] = 0;
+                    msg_remove_finished finished = {{REMOVE_FINISHED}};
+                    send_sock(succ.peer_fd, (char*) &finished, sizeof(finished));
+                  }
                 } else {
                   forward_content(content_msg, content);
                 }
