@@ -23,6 +23,7 @@ typedef enum {
   FORWARD_COUNTS,
   PRED_REMOVAL,
   ADD_CONTENT,
+  GET_CONTENT_KEYS,
   FORWARD_CONTENT,
   REQUEST_CONTENT,
   ACK, // No purpose, just debugging
@@ -41,6 +42,7 @@ char* msg_type_to_str(msg_type type) {
     case FORWARD_COUNTS: return (char *) "FORWARD_COUNTS";
     case PRED_REMOVAL: return (char *) "PRED_REMOVAL";
     case ADD_CONTENT: return (char *) "ADD_CONTENT";
+    case GET_CONTENT_KEYS: return (char *) "GET_CONTENT_KEYS";
     case FORWARD_CONTENT: return (char *) "FORWARD_CONTENT";
     case REQUEST_CONTENT: return (char *) "REQUEST_CONTENT";
     case ACK: return (char *) "ACK";

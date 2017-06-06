@@ -226,6 +226,19 @@ int main(int argc, char *argv[]) {
                 }
                 break;
               }
+              case GET_CONTENT_KEYS: {
+                int map_size = content_map.size();
+                send_sock(client_sockfd, (char *) &map_size, sizeof(int));
+                if (map_size > 0) {
+                  unsigned int keys[map_size];
+                  int i = 0;
+                  for (std::map<unsigned int, std::string>::iterator it = content_map.begin(); it != content_map.end(); it++) {
+                    keys[i++] = it->first;
+                  }
+                  send_sock(client_sockfd, (char *) &keys, sizeof(keys));
+                }
+                break;
+              }
               case GET_INFO: {
                 print_info();
                 msg_info msg = {{INFO}, server, debug_id, pred.peer_server, pred.peer_debug_id, succ.peer_server, succ.peer_debug_id, numContent, numPeers, nextId};
