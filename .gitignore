@@ -12,3 +12,7 @@ removecontent
 lookupcontent
 allkeys
 ping
+target
+Cargo.lock
+**/*.rs.bk
+127.0.0.1.*
