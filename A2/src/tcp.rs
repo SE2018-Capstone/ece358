@@ -36,20 +36,21 @@ pub enum TCBInput {
 
 #[derive(Debug)]
 pub struct TCB {
-    pub tuple: TCPTuple,
-    pub state: TCBState,
-    pub socket: UdpSocket,
-    pub data_input: Receiver<TCBInput>,
-    pub byte_output: Sender<u8>,
+    tuple: TCPTuple,
+    state: TCBState,
+    socket: UdpSocket,
+    data_input: Receiver<TCBInput>,
+    byte_output: Sender<u8>,
 
-    pub send_buffer: VecDeque<u8>, // Data to be sent that hasn't been
-    pub send_window: VecDeque<u8>,
-    pub recv_window: VecDeque<Option<u8>>,
+    send_buffer: VecDeque<u8>, // Data to be sent that hasn't been
+    send_window: VecDeque<u8>,
+    recv_window: VecDeque<Option<u8>>,
 
-    pub seq_base: u32,
-    pub ack_base: u32,
+    seq_base: u32,
+    ack_base: u32,
 
-    pub unacked_segs: VecDeque<Segment>,
+    unacked_segs: VecDeque<Segment>,
+    dupe_acks: u32,
 }
 
 impl TCB {
@@ -72,18 +73,19 @@ impl TCB {
                 ack_base: 1,
 
                 unacked_segs: VecDeque::new(),
+                dupe_acks: 0,
             },
             data_input_tx,
             byte_output_rx,
         )
     }
 
-    pub fn recv(out: &Receiver<u8>, amt: u32) -> Vec<u8> {
+    pub fn recv(out: &Receiver<u8>, amt: u32) -> Result<Vec<u8>, RecvError> {
         let mut buf = Vec::with_capacity(amt as usize);
         while buf.len() < amt as usize {
-            buf.extend(out.recv());
+            buf.push(out.recv()?);
         }
-        buf
+        Ok(buf)
     }
 
     pub fn run_tcp(&mut self) {
@@ -111,12 +113,12 @@ impl TCB {
                         self.fill_send_window();
                     }
                     TCBInput::Close => {
-                        self.handle_close();
+                        self.send_close();
                     }
                 }
             }
             Err(e) if e == RecvTimeoutError::Timeout => {
-                self.handle_timeout();
+                self.handle_resend();
             }
             Err(e) => panic!(e),
         }
@@ -132,7 +134,7 @@ impl TCB {
             self.send_buffer.iter().take(send_amt),
         );
         let data_to_send = self.send_buffer.drain(..send_amt).collect::<Vec<u8>>();
-        let next_seq = self.seq_base + orig_window_len as u32;
+        let next_seq = self.seq_base.wrapping_add(orig_window_len as u32);
         self.send_data(data_to_send, next_seq);
     }
 
@@ -151,14 +153,12 @@ impl TCB {
     }
 
     fn handle_seg(&mut self, seg: Segment) {
-        if seg.get_flag(Flag::FIN) {
-            // TODO: Handle close properly
-            self.state = TCBState::Closed;
-            return;
-        }
         self.handle_acks(&seg); // sender
         self.handle_shake(&seg);
         self.handle_payload(&seg); // receiver
+        if seg.get_flag(Flag::FIN) {
+            self.handle_close();
+        }
     }
 
     fn handle_payload(&mut self, seg: &Segment) {
@@ -191,7 +191,7 @@ impl TCB {
                     }
                     _ => break,
                 }
-                self.ack_base += 1;
+                self.ack_base = self.ack_base.wrapping_add(1);
                 self.recv_window.pop_front();
                 self.recv_window.push_back(None);
             }
@@ -214,7 +214,13 @@ impl TCB {
         let ack_ub = ack_lb.wrapping_add(WINDOW_SIZE as u32);
         if seg.get_flag(Flag::ACK) && in_wrapped_range((ack_lb, ack_ub), seg.ack_num()) {
             self.unacked_segs.retain(|unacked_seg: &Segment| {
-                unacked_seg.seq_num() >= seg.ack_num()
+                in_wrapped_range(
+                    (
+                        seg.ack_num(),
+                        seg.ack_num().wrapping_add(WINDOW_SIZE as u32),
+                    ),
+                    unacked_seg.seq_num(),
+                )
             });
 
             let num_acked_bytes = seg.ack_num().wrapping_sub(self.seq_base) as usize;
@@ -226,6 +232,19 @@ impl TCB {
                 self.fill_send_window();
             }
 
+        }
+
+        let dupe_ack_lb = self.seq_base.wrapping_sub((WINDOW_SIZE - 1) as u32);
+        let dupe_ack_ub = dupe_ack_lb.wrapping_add(WINDOW_SIZE as u32);
+        if self.state == TCBState::Estab && seg.get_flag(Flag::ACK) &&
+            in_wrapped_range((dupe_ack_lb, dupe_ack_ub), seg.seq_num())
+        {
+            self.dupe_acks += 1;
+            if self.dupe_acks >= 3 {
+                self.handle_resend();
+                self.dupe_acks = 0;
+                println!("\x1b[31m Triple Duplicate ACK! Resending \x1b[0m");
+            }
         }
     }
 
@@ -268,10 +287,18 @@ impl TCB {
 
 
     fn handle_close(&mut self) {
-        // TODO
+        self.state = TCBState::Closed;
     }
 
-    fn handle_timeout(&mut self) {
+    fn send_close(&mut self) {
+        let mut fin = self.make_seg();
+        fin.set_flag(Flag::FIN);
+        fin.set_seq(self.seq_base);
+        self.send_seg(fin);
+        self.state = TCBState::Closed;
+    }
+
+    fn handle_resend(&mut self) {
         match self.unacked_segs.front() {
             Some(ref seg) => self.resend_seg(&seg),
             _ => {}
@@ -283,7 +310,6 @@ impl TCB {
     }
 
     fn send_seg(&mut self, seg: Segment) {
-        assert!(seg.seq_num() >= self.seq_base);
         self.resend_seg(&seg);
         self.unacked_segs.push_back(seg);
     }
@@ -324,7 +350,7 @@ pub mod tests {
     fn sock_recv(sock: &UdpSocket) -> Segment {
         let mut buf = vec![0; (1 << 16) - 1];
         let (amt, _) = sock.recv_from(&mut buf).unwrap();
-        let buf = Vec::from(&mut buf[..amt]);
+        buf.truncate(amt);
         Segment::from_buf(buf)
     }
 
@@ -337,7 +363,8 @@ pub mod tests {
         let (ref mut server_tcb, ref server_input, _) = *server_tuple;
         let (ref mut client_tcb, ref client_input, _) = *client_tuple;
 
-        client_tcb.send_syn();
+        client_input.send(TCBInput::SendSyn).unwrap();
+        client_tcb.handle_input_recv();
         assert_eq!(client_tcb.state, TCBState::SynSent);
 
         let client_syn: Segment = sock_recv(&server_sock);
@@ -396,6 +423,7 @@ pub mod tests {
     #[test]
     fn send_test() {
         let (mut server_tuple, mut client_tuple, server_sock, client_sock) = tcb_pair();
+        server_tuple.0.seq_base = u32::max_value() - 2; // Test wrapping around u32 boundaries
         perform_handshake(
             &mut server_tuple,
             &mut client_tuple,
@@ -409,7 +437,7 @@ pub mod tests {
         let data_len = WINDOW_SIZE;
         let str = String::from("Ok");
         assert!(str.len() <= MAX_PAYLOAD_SIZE);
-        let mut data = vec![5; data_len];
+        let mut data = (0..data_len).map(|r| r as u8).collect::<Vec<u8>>();
         data.extend(str.clone().into_bytes());
         server_input.send(TCBInput::Send(data)).unwrap();
         server_tcb.handle_input_recv();
@@ -426,6 +454,21 @@ pub mod tests {
         server_tcb.handle_input_recv();
         let next_seg = sock_recv(&client_sock);
         assert_eq!(next_seg.payload(), str.into_bytes());
+
+        // Check for Duplicate ACK resends
+        for _ in 0..5 {
+            let mut ack = client_tcb.make_seg();
+            ack.set_flag(Flag::ACK);
+            ack.set_ack_num(segments[1].seq_num());
+            server_input.send(TCBInput::Receive(ack)).unwrap();
+            server_tcb.handle_input_recv();
+        }
+
+        let next_seg = sock_recv(&client_sock);
+        assert_eq!(next_seg.seq_num(), segments[1].seq_num());
+
+        let next_seg = sock_recv(&client_sock);
+        assert_eq!(next_seg.seq_num(), segments[1].seq_num());
     }
 
     pub fn run_e2e_pair<F1, F2>(
@@ -445,7 +488,9 @@ pub mod tests {
         let _server_message_passer = thread::spawn(move || loop {
             let seg = sock_recv(&server_client_sock);
             // println!("\x1b[33m Server->Client {:?} \x1b[0m", seg);
-            server_client_sender.send(TCBInput::Receive(seg)).unwrap();
+            if server_client_sender.send(TCBInput::Receive(seg)).is_err() {
+                break;
+            }
         });
 
         let client_server_sender = server_input.clone();
@@ -453,7 +498,9 @@ pub mod tests {
         let _client_message_passer = thread::spawn(move || loop {
             let seg = sock_recv(&client_server_sock);
             // println!("\x1b[35m Client->Server {:?} \x1b[0m", seg);
-            client_server_sender.send(TCBInput::Receive(seg)).unwrap();
+            if client_server_sender.send(TCBInput::Receive(seg)).is_err() {
+                break;
+            }
         });
 
         let _server = thread::spawn(move || server_fn(server_tcb));
@@ -467,7 +514,7 @@ pub mod tests {
     }
 
     #[test]
-    fn e2e_test() {
+    fn send_recv_test() {
         let ((server_input, _, _), (client_input, client_output, _)) =
             run_e2e_pair(
                 |mut server_tcb: TCB| server_tcb.run_tcp(),
@@ -486,7 +533,28 @@ pub mod tests {
         }
 
         assert_eq!(String::from_utf8(buf).unwrap(), text);
+    }
 
+    #[test]
+    fn close_test() {
+        let (mut server_tuple, mut client_tuple, server_sock, client_sock) = tcb_pair();
+        perform_handshake(
+            &mut server_tuple,
+            &mut client_tuple,
+            &server_sock,
+            &client_sock,
+        );
 
+        let (mut server_tcb, server_input, _) = server_tuple;
+        let (mut client_tcb, client_input, _) = client_tuple;
+
+        client_input.send(TCBInput::Close).unwrap();
+        client_tcb.handle_input_recv();
+        let client_fin = sock_recv(&server_sock);
+        server_input.send(TCBInput::Receive(client_fin)).unwrap();
+        server_tcb.handle_input_recv();
+
+        assert_eq!(server_tcb.state, TCBState::Closed);
+        assert_eq!(client_tcb.state, TCBState::Closed);
     }
 }

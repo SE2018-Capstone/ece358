@@ -1,5 +1,5 @@
-pub mod tcp;
 pub mod utils;
+pub mod tcp;
 pub mod segment;
 pub mod config;
 use tcp::*;
@@ -11,7 +11,7 @@ use utils::*;
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::collections::hash_map::Entry;
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Sender, Receiver, RecvError, SendError};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
@@ -38,16 +38,17 @@ fn get_file(tuple: &TCPTuple, folder: &Path) -> Result<File, std::io::Error> {
     Ok(file)
 }
 
-fn send_str(tcb_input: &Sender<TCBInput>, s: String) {
+fn send_str(tcb_input: &Sender<TCBInput>, s: String) -> Result<(), SendError<TCBInput>> {
     let len: u32 = s.len() as u32;
     let mut bytes = u32_to_u8(len);
     bytes.extend(s.into_bytes());
-    tcb_input.send(TCBInput::Send(bytes)).unwrap();
+    tcb_input.send(TCBInput::Send(bytes))?;
+    Ok(())
 }
 
-fn recv_str(tcb_output: &Receiver<u8>) -> String {
-    let size = buf_to_u32(&TCB::recv(&tcb_output, 4)[..]);
-    String::from_utf8(TCB::recv(&tcb_output, size)).unwrap()
+fn recv_str(tcb_output: &Receiver<u8>) -> Result<String, RecvError> {
+    let size = buf_to_u32(&TCB::recv(&tcb_output, 4)?[..]);
+    Ok(String::from_utf8(TCB::recv(&tcb_output, size)?).unwrap())
 }
 
 fn run_server_tcb(config: Config, tuple: TCPTuple, input: Sender<TCBInput>, output: Receiver<u8>) {
@@ -60,14 +61,21 @@ fn run_server_tcb(config: Config, tuple: TCPTuple, input: Sender<TCBInput>, outp
 
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
-    send_str(&input, s);
+    send_str(&input, s).unwrap_or_else(|_| return);
 
-    loop {
-        let data = recv_str(&output);
-        file.write_all(&data.as_bytes()).unwrap();
-        send_str(&input, data);
+    'main_application_loop: loop {
+        match recv_str(&output) {
+            Ok(data) => {
+                file.write_all(&data.as_bytes()).unwrap();
+                // Errors when Closed
+                if send_str(&input, data).is_err() {
+                    break 'main_application_loop;
+                }
+            }
+            Err(_) => break 'main_application_loop,
+        }
     }
-    //    file.sync_all().unwrap();
+    file.sync_all().unwrap();
 }
 
 fn multiplexed_receive(
@@ -78,7 +86,7 @@ fn multiplexed_receive(
     let mut buf = vec![0; (1 << 16) - 1];
     match socket.recv_from(&mut buf) {
         Ok((amt, src)) => {
-            let buf = Vec::from(&mut buf[..amt]);
+            buf.truncate(amt);
             let seg = Segment::from_buf(buf);
             if seg.validate() {
                 let tuple = TCPTuple {
@@ -155,13 +163,28 @@ mod tests {
 
         client_input.send(TCBInput::SendSyn).unwrap();
 
-        send_str(&server_input, String::from(SCRIPT));
-        let output = recv_str(&client_output);
+        send_str(&server_input, String::from(SCRIPT)).unwrap();
+        let output = recv_str(&client_output).unwrap();
         assert_eq!(output, String::from(SCRIPT));
 
-        send_str(&client_input, String::from(SCRIPT));
-        let output = recv_str(&server_output);
+        send_str(&client_input, String::from(SCRIPT)).unwrap();
+        let output = recv_str(&server_output).unwrap();
         assert_eq!(output, String::from(SCRIPT));
+    }
+
+    fn get_tuples_from_socks(
+        server_sock: &UdpSocket,
+        client_sock: &UdpSocket,
+    ) -> (TCPTuple, TCPTuple) {
+        let server_tuple = TCPTuple {
+            src: server_sock.local_addr().unwrap(),
+            dst: client_sock.local_addr().unwrap(),
+        };
+        let client_tuple = TCPTuple {
+            src: client_sock.local_addr().unwrap(),
+            dst: server_sock.local_addr().unwrap(),
+        };
+        (server_tuple, client_tuple)
     }
 
     #[test]
@@ -173,14 +196,8 @@ mod tests {
                 |mut client_tcb: TCB| client_tcb.run_tcp(),
             );
 
-        let server_tuple = TCPTuple {
-            src: server_sock.local_addr().unwrap(),
-            dst: client_sock.local_addr().unwrap(),
-        };
-        let _client_tuple = TCPTuple {
-            src: client_sock.local_addr().unwrap(),
-            dst: server_sock.local_addr().unwrap(),
-        };
+        let (server_tuple, _) = get_tuples_from_socks(&server_sock, &client_sock);
+
         let server_config = Config {
             port: server_sock.local_addr().unwrap().port(),
             filepath: PathBuf::from("./"),
@@ -202,17 +219,52 @@ mod tests {
         drop(file);
 
         client_input.send(TCBInput::SendSyn).unwrap();
-        let file_contents = recv_str(&client_output);
+        let file_contents = recv_str(&client_output).unwrap();
 
         // NOTE: Sometimes the write doesn't actually succeed even though both flush and sync_data
         //       are called, so this assertion might fail...  just re-run the test if it does
-        assert_eq!(file_contents, initial_contents);
+        assert_eq!(
+            file_contents,
+            initial_contents,
+            "\n\x1b[35m NOTE: This test may not have actually failed, try re-running \x1b[0m"
+        );
 
         let response = String::from("It's not a story the jedi would tell you");
-        send_str(&client_input, response.clone());
-        let ack = recv_str(&client_output);
+        send_str(&client_input, response.clone()).unwrap();
+        let ack = recv_str(&client_output).unwrap();
 
         assert_eq!(ack, response);
+
+        client_input.send(TCBInput::Close).unwrap();
+        _server.join().unwrap();
+
+        assert!(client_input.send(TCBInput::Close).is_err());
+
         std::fs::remove_file(filepath.clone()).unwrap();
+    }
+
+    #[test]
+    #[ignore] // Reliant on existance of root_only_dir which is owned by root with permissions 700
+    fn server_close_test() {
+        let ((server_input, server_output, server_sock),
+             (client_input, client_output, client_sock)) =
+            tcp::tests::run_e2e_pair(
+                |mut server_tcb: TCB| server_tcb.run_tcp(),
+                |mut client_tcb: TCB| client_tcb.run_tcp(),
+            );
+
+        let (server_tuple, _) = get_tuples_from_socks(&server_sock, &client_sock);
+
+        let server_config = Config {
+            port: server_sock.local_addr().unwrap().port(),
+            filepath: PathBuf::from("./root_only_dir/"),
+        };
+
+        let _server = std::thread::spawn(move || {
+            run_server_tcb(server_config, server_tuple, server_input, server_output);
+        });
+
+        client_input.send(TCBInput::SendSyn).unwrap();
+        assert!(client_output.recv().is_err());
     }
 }
